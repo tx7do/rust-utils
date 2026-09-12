@@ -73,9 +73,7 @@ impl<'a> Rdr<'a> {
     /// 判断当前正在读取的词是否命中某个"不可拆分"候选词的前缀。
     fn is_no_split_word(&self, s_idx: usize, no_split: &[&str]) -> bool {
         let current: String = self.input[s_idx..=self.pos].iter().collect();
-        no_split
-            .iter()
-            .any(|w| w.starts_with(current.as_str()))
+        no_split.iter().any(|w| w.starts_with(current.as_str()))
     }
 
     fn read_next_part(&mut self, no_split: &[&str]) -> String {
@@ -329,7 +327,11 @@ pub fn is_snake_case(s: &str) -> bool {
 
 /// 把所有非 ASCII 字母/数字的连续字符替换为 `replacement`(为空则用 `_`)。
 pub fn replace_non_alphanumeric(s: &str, replacement: &str) -> String {
-    let replacement = if replacement.is_empty() { "_" } else { replacement };
+    let replacement = if replacement.is_empty() {
+        "_"
+    } else {
+        replacement
+    };
     let mut out = String::with_capacity(s.len());
     let mut in_run = false;
     for c in s.chars() {
@@ -626,13 +628,19 @@ mod tests {
             ("parse_url.do_parse", &["parse", "url", "do", "parse"]),
             ("convert space", &["convert", "space"]),
             ("convert-dash", &["convert", "dash"]),
-            ("skip___multiple_underscores", &["skip", "multiple", "underscores"]),
+            (
+                "skip___multiple_underscores",
+                &["skip", "multiple", "underscores"],
+            ),
             ("skip   multiple spaces", &["skip", "multiple", "spaces"]),
             ("skip---multiple-dashes", &["skip", "multiple", "dashes"]),
             ("", &[""]),
             ("a", &["a"]),
             ("Z", &["Z"]),
-            ("special-characters_test", &["special", "characters", "test"]),
+            (
+                "special-characters_test",
+                &["special", "characters", "test"],
+            ),
             ("numbers123test", &["numbers", "123", "test"]),
             ("hello world!", &["hello", "world"]),
             ("test@with#symbols", &["test", "with", "symbols"]),

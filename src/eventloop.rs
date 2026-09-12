@@ -300,11 +300,7 @@ impl<T> Clone for EventLoop<T> {
 impl<T: Send + 'static> EventLoop<T> {
     /// 创建事件循环。`buffer_size` 为 0 时使用 [`DEFAULT_BUFFER_SIZE`];
     /// `frame_driven` 启用帧驱动模式;`metrics` 传 `None` 时使用 [`NoopMetrics`]。
-    pub fn new(
-        buffer_size: usize,
-        processor: impl EventProcessor<T>,
-        frame_driven: bool,
-    ) -> Self {
+    pub fn new(buffer_size: usize, processor: impl EventProcessor<T>, frame_driven: bool) -> Self {
         EventLoop::with_metrics(buffer_size, processor, frame_driven, None)
     }
 
@@ -510,11 +506,7 @@ impl<T: Send + 'static> EventLoop<T> {
                     if now >= d {
                         return Err(EventLoopError::SubmitTimeout);
                     }
-                    let (guard, _) = self
-                        .inner
-                        .space_cv
-                        .wait_timeout(q, d - now)
-                        .unwrap();
+                    let (guard, _) = self.inner.space_cv.wait_timeout(q, d - now).unwrap();
                     q = guard;
                 }
                 None => {
@@ -601,10 +593,7 @@ fn frame_loop<T: Send + 'static>(inner: Arc<Inner<T>>) {
                     next_frame = now + inner.config.lock().unwrap().frame_interval;
                     break;
                 }
-                let (guard, _) = inner
-                    .event_cv
-                    .wait_timeout(q, next_frame - now)
-                    .unwrap();
+                let (guard, _) = inner.event_cv.wait_timeout(q, next_frame - now).unwrap();
                 q = guard;
             }
         }
@@ -613,10 +602,7 @@ fn frame_loop<T: Send + 'static>(inner: Arc<Inner<T>>) {
 }
 
 /// 处理单帧:高/中优先级清空(受帧预算约束),低优先级限时处理。
-fn process_frame<T: Send + 'static>(
-    inner: &Arc<Inner<T>>,
-    processor: &mut dyn EventProcessor<T>,
-) {
+fn process_frame<T: Send + 'static>(inner: &Arc<Inner<T>>, processor: &mut dyn EventProcessor<T>) {
     let frame_start = Instant::now();
     let (frame_budget, max_low_time) = {
         let cfg = inner.config.lock().unwrap();
@@ -851,11 +837,7 @@ impl<T> CbSender<T> {
     }
 
     /// 带超时的投递。
-    pub fn send_timeout(
-        &self,
-        value: T,
-        timeout: Duration,
-    ) -> Result<(), CbSendTimeoutError<T>> {
+    pub fn send_timeout(&self, value: T, timeout: Duration) -> Result<(), CbSendTimeoutError<T>> {
         let deadline = Instant::now() + timeout;
         let mut q = self.shared.queue.lock().unwrap();
         loop {
@@ -956,26 +938,65 @@ mod tests {
 
     #[test]
     fn test_priority_order() {
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let loop_ = EventLoop::new(16, Collector(seen.clone()), false);
+        // 先让一个事件堵住闸门,保证后面三个事件全部入队后才开始消费
+        let processor_events: Vec<Event<String>> = Vec::new();
+        struct GateAndCollect {
+            gate: Arc<(Mutex<bool>, Condvar)>,
+            seen: Arc<Mutex<Vec<String>>>,
+        }
+        impl EventProcessor<String> for GateAndCollect {
+            fn process(&mut self, event: Event<String>) -> EventResult<String> {
+                {
+                    let (lock, cv) = &*self.gate;
+                    let mut open = lock.lock().unwrap();
+                    while !*open {
+                        open = cv.wait(open).unwrap();
+                    }
+                }
+                self.seen.lock().unwrap().push(event.event_type.clone());
+                EventResult::ok(event.data)
+            }
+        }
+        let _ = processor_events;
+        let loop_ = EventLoop::new(
+            16,
+            GateAndCollect {
+                gate: gate.clone(),
+                seen: seen.clone(),
+            },
+            false,
+        );
         loop_.start();
+
+        loop_
+            .submit(Event::new("blocker", None).with_priority(Priority::High))
+            .unwrap();
+        thread::sleep(Duration::from_millis(50)); // blocker 已进入处理并阻塞
 
         loop_
             .submit(Event::new("low", None).with_priority(Priority::Low))
             .unwrap();
         loop_
-            .submit(Event::new("high", None).with_priority(Priority::High))
-            .unwrap();
-        loop_
             .submit(Event::new("medium", None).with_priority(Priority::Medium))
             .unwrap();
+        loop_
+            .submit(Event::new("high", None).with_priority(Priority::High))
+            .unwrap();
 
-        wait_for(|| seen.lock().unwrap().len() == 3);
+        {
+            let (lock, cv) = &*gate;
+            *lock.lock().unwrap() = true;
+            cv.notify_all();
+        }
+
+        wait_for(|| seen.lock().unwrap().len() == 4);
         loop_.stop();
 
         let guard = seen.lock().unwrap();
-        let order: Vec<&str> = guard.iter().map(|(_, name)| name.as_str()).collect();
-        assert_eq!(order, vec!["high", "medium", "low"]);
+        let order: Vec<&str> = guard.iter().map(|s| s.as_str()).collect();
+        assert_eq!(order, vec!["blocker", "high", "medium", "low"]);
     }
 
     #[test]

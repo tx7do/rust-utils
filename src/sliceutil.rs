@@ -10,25 +10,19 @@
 //! - 空切片集合运算在 Go 中可能触发空切片下标,这里做了保护。
 
 /// 查找第一个满足条件的元素。
-pub fn find<'a, T>(slice: &'a [T], predicate: impl Fn(&T, usize) -> bool) -> Option<&'a T> {
-    slice.iter().enumerate().find_map(|(i, el)| {
-        if predicate(el, i) {
-            Some(el)
-        } else {
-            None
-        }
-    })
+pub fn find<T>(slice: &[T], predicate: impl Fn(&T, usize) -> bool) -> Option<&T> {
+    slice
+        .iter()
+        .enumerate()
+        .find_map(|(i, el)| if predicate(el, i) { Some(el) } else { None })
 }
 
 /// 查找第一个满足条件的元素下标。
 pub fn find_index<T>(slice: &[T], predicate: impl Fn(&T, usize) -> bool) -> Option<usize> {
-    slice.iter().enumerate().find_map(|(i, el)| {
-        if predicate(el, i) {
-            Some(i)
-        } else {
-            None
-        }
-    })
+    slice
+        .iter()
+        .enumerate()
+        .find_map(|(i, el)| if predicate(el, i) { Some(i) } else { None })
 }
 
 /// 查找第一个等于 `value` 的元素下标。

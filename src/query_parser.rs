@@ -126,21 +126,19 @@ where
             for k in keys {
                 parse_filter_field(k, &map[k], &mut handler);
             }
-            return Ok(());
+            Ok(())
         }
-        Err(first_err) => match serde_json::from_str::<Vec<HashMap<String, String>>>(query) {
-            Ok(arr) => {
-                for item in &arr {
-                    let mut keys: Vec<&String> = item.keys().collect();
-                    keys.sort();
-                    for k in keys {
-                        parse_filter_field(k, &item[k], &mut handler);
-                    }
+        Err(_first_err) => {
+            let arr = serde_json::from_str::<Vec<HashMap<String, String>>>(query)?;
+            for item in &arr {
+                let mut keys: Vec<&String> = item.keys().collect();
+                keys.sort();
+                for k in keys {
+                    parse_filter_field(k, &item[k], &mut handler);
                 }
-                return Ok(());
             }
-            Err(e) => return Err(e),
-        },
+            Ok(())
+        }
     }
 }
 
@@ -369,7 +367,10 @@ mod tests {
         parse_filter_field("userName__icontains", "abc", |f, o, v| {
             got.push((f.to_string(), o.to_string(), v.to_string()))
         });
-        assert_eq!(got, vec![("user_name".into(), "icontains".into(), "abc".into())]);
+        assert_eq!(
+            got,
+            vec![("user_name".into(), "icontains".into(), "abc".into())]
+        );
 
         let mut got2 = Vec::new();
         parse_filter_field("id", "5", |f, o, v| {
@@ -388,9 +389,10 @@ mod tests {
     #[cfg(feature = "json")]
     fn test_parse_filter_json_string() {
         let mut got = Vec::new();
-        parse_filter_json_string(r#"{"userName__icontains":"abc","age__gte":"18"}"#, |f, o, v| {
-            got.push((f.to_string(), o.to_string(), v.to_string()))
-        })
+        parse_filter_json_string(
+            r#"{"userName__icontains":"abc","age__gte":"18"}"#,
+            |f, o, v| got.push((f.to_string(), o.to_string(), v.to_string())),
+        )
         .unwrap();
         got.sort();
         assert_eq!(
@@ -448,7 +450,10 @@ mod tests {
         let mut got2: Vec<(String, bool)> = Vec::new();
         parse_order_by_strings(&["-a", "", "b"], |f, desc| got2.push((f.to_string(), desc)))
             .unwrap();
-        assert_eq!(got2, vec![("a".to_string(), true), ("b".to_string(), false)]);
+        assert_eq!(
+            got2,
+            vec![("a".to_string(), true), ("b".to_string(), false)]
+        );
     }
 
     #[test]

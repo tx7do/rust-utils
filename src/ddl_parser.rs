@@ -234,7 +234,7 @@ fn parse_columns(block: &str) -> Vec<ColumnDef> {
 
     if !primary_key_columns.is_empty() {
         for col in columns.iter_mut() {
-            if primary_key_columns.iter().any(|pk| *pk == col.name) {
+            if primary_key_columns.contains(&col.name) {
                 col.primary_key = true;
             }
         }
@@ -351,9 +351,7 @@ fn parse_column(def: &str) -> Result<ColumnDef, String> {
     };
 
     // 类型可能带括号且跨 token(如 `decimal(10, 2)`)
-    let mut column_type = parts[1]
-        .trim_matches(|c| c == '`' || c == '"')
-        .to_string();
+    let mut column_type = parts[1].trim_matches(|c| c == '`' || c == '"').to_string();
     let mut i = 2;
     while i < parts.len() && parts[i - 1].contains('(') && !parts[i - 1].contains(')') {
         column_type.push(' ');
@@ -383,11 +381,9 @@ fn parse_column(def: &str) -> Result<ColumnDef, String> {
                 col.auto_increment = true;
             }
             "unique" => col.unique = true,
-            "default" => {
-                if j + 1 < parts.len() {
-                    col.default = parts[j + 1].to_string();
-                    j += 1;
-                }
+            "default" if j + 1 < parts.len() => {
+                col.default = parts[j + 1].to_string();
+                j += 1;
             }
             _ => {}
         }
@@ -534,7 +530,8 @@ pub fn parse_create_tables(sql: &str) -> Result<Vec<TableDef>, String> {
         if !is_create_table_statement(stmt) {
             continue;
         }
-        tables.push(parse_create_table(stmt).map_err(|e| format!("parse create table failed: {e}"))?);
+        tables
+            .push(parse_create_table(stmt).map_err(|e| format!("parse create table failed: {e}"))?);
     }
     Ok(tables)
 }
@@ -566,9 +563,7 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
             '"' if !in_single && !in_backtick => in_double = !in_double,
             '`' if !in_single && !in_double => in_backtick = !in_backtick,
             '(' if !in_single && !in_double && !in_backtick => paren_level += 1,
-            ')' if !in_single && !in_double && !in_backtick && paren_level > 0 => {
-                paren_level -= 1
-            }
+            ')' if !in_single && !in_double && !in_backtick && paren_level > 0 => paren_level -= 1,
             ';' if !in_single && !in_double && !in_backtick && paren_level == 0 => {
                 parts.push(std::mem::take(&mut current));
                 continue;

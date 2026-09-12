@@ -14,6 +14,7 @@
 //! | [`mathutil`]     | math            | 默认             |
 //! | [`pagination`]   | pagination      | 默认             |
 //! | [`cryptocurrency`] | cryptocurrency | 默认            |
+//! | [`bank_card`]    | bank_card       | `bank-card`      |
 //! | [`query_parser`] | query_parser    | `json`           |
 //! | [`ddl_parser`]   | ddl_parser      | 默认             |
 //! | [`eventloop`]    | eventloop       | 默认             |
@@ -45,12 +46,12 @@ pub mod query_parser;
 pub mod sliceutil;
 pub mod stringcase;
 
-#[cfg(feature = "chrono")]
-pub mod dateutil;
-#[cfg(feature = "chrono")]
-pub mod timeutil;
+#[cfg(feature = "bank-card")]
+pub mod bank_card;
 #[cfg(feature = "crypto")]
 pub mod crypto;
+#[cfg(feature = "chrono")]
+pub mod dateutil;
 #[cfg(feature = "jwt")]
 pub mod jwt;
 #[cfg(feature = "name-generator")]
@@ -59,3 +60,5 @@ pub mod name_generator;
 pub mod random;
 #[cfg(feature = "slug")]
 pub mod slug;
+#[cfg(feature = "chrono")]
+pub mod timeutil;

@@ -51,10 +51,7 @@ mod tests {
     use super::*;
 
     fn map<const N: usize>(pairs: [(&str, i32); N]) -> HashMap<String, i32> {
-        pairs
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect()
+        pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
     }
 
     #[test]

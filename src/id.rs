@@ -94,9 +94,7 @@ impl SnowflakeNode {
             st.1 = 0;
             st.0 = now;
         }
-        ((now - SNOWFLAKE_EPOCH_MS) << TIMESTAMP_SHIFT)
-            | (self.worker_id << WORKER_ID_SHIFT)
-            | st.1
+        ((now - SNOWFLAKE_EPOCH_MS) << TIMESTAMP_SHIFT) | (self.worker_id << WORKER_ID_SHIFT) | st.1
     }
 
     /// 生成一个 ID 的十进制字符串形式。
@@ -220,10 +218,7 @@ pub fn generate_order_id_with_tenant_id(tenant_id: &str) -> String {
         format!("{tenant_id:<5}").replace(' ', "0")
     };
     let random_part = format!("{:04}", fast_rand_below(10_000));
-    format!(
-        "{}{tenant_part}{random_part}",
-        format_compact_datetime(now)
-    )
+    format!("{}{tenant_part}{random_part}", format_compact_datetime(now))
 }
 
 /// 前缀 + 雪花 ID(全局节点 1)。
@@ -257,7 +252,12 @@ pub fn raw_machine_id() -> Result<String, String> {
     #[cfg(windows)]
     {
         let output = std::process::Command::new("reg")
-            .args(["query", r"HKLM\SOFTWARE\Microsoft\Cryptography", "/v", "MachineGuid"])
+            .args([
+                "query",
+                r"HKLM\SOFTWARE\Microsoft\Cryptography",
+                "/v",
+                "MachineGuid",
+            ])
             .output()
             .map_err(|e| format!("获取machineId失败: {e}"))?;
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -579,7 +579,13 @@ mod tests {
                 .unwrap();
         assert_eq!(unified2, "550e8400e29b41d4a716446655440000");
 
-        let hyphenated = apply_machine_id_format(&unified2, FormatOption { upper_case: true, with_hyphen: true });
+        let hyphenated = apply_machine_id_format(
+            &unified2,
+            FormatOption {
+                upper_case: true,
+                with_hyphen: true,
+            },
+        );
         assert_eq!(hyphenated, "550E8400-E29B-41D4-A716-446655440000");
 
         // 真机读取(不校验具体值,只要求能出结果或明确报错)

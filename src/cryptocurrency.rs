@@ -52,7 +52,12 @@ fn is_base58_charset(c: char) -> bool {
     matches!(c, '1'..='9' | 'A'..='H' | 'J'..='N' | 'P'..='Z' | 'a'..='k' | 'm'..='z')
 }
 
-fn check(address: &str, prefix: &str, charset: fn(char) -> bool, body: impl Fn(usize) -> bool) -> bool {
+fn check(
+    address: &str,
+    prefix: &str,
+    charset: fn(char) -> bool,
+    body: impl Fn(usize) -> bool,
+) -> bool {
     match address.strip_prefix(prefix) {
         Some(rest) => body(rest.chars().count()) && rest.chars().all(charset),
         None => false,
@@ -130,9 +135,7 @@ pub fn is_valid_cryptocurrency_address(address: &str) -> &'static str {
     {
         return WALLET_BTG;
     }
-    if check(address, "X", is_alnum, |n| n == 33)
-        || check(address, "7", is_alnum, |n| n == 33)
-    {
+    if check(address, "X", is_alnum, |n| n == 33) || check(address, "7", is_alnum, |n| n == 33) {
         return WALLET_DASH;
     }
     if check(address, "D", is_alnum, |n| (24..=33).contains(&n)) {

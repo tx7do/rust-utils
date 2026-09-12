@@ -73,6 +73,8 @@ pub fn erfc(x: f64) -> f64 {
 }
 
 /// 逆补余误差函数,取自 Numerical Recipes 3e p265。
+/// 其中的常量为该算法的固定拟合系数,不可替换为精确数学常量。
+#[allow(clippy::approx_constant)]
 pub fn ierfc(x: f64) -> f64 {
     if x >= 2.0 {
         return -100.0;
@@ -85,7 +87,7 @@ pub fn ierfc(x: f64) -> f64 {
     let mut r = -0.70711 * ((2.30753 + t * 0.27061) / (1.0 + t * (0.99229 + t * 0.04481)) - t);
     for _ in 0..2 {
         let e = erfc(r) - xx;
-        r += e / (1.12837916709551257 * (-(r * r)).exp() - r * e);
+        r += e / (1.128_379_167_095_512_6 * (-(r * r)).exp() - r * e);
     }
     if x < 1.0 {
         r
@@ -206,7 +208,9 @@ mod tests {
         let g = Gaussian::new(2.0, 9.0);
         // pdf 在均值处取峰值
         let peak = g.pdf(2.0);
-        assert!(peak > 0.0 && (peak - 1.0 / (3.0 * (2.0 * std::f64::consts::PI).sqrt())).abs() < 1e-9);
+        assert!(
+            peak > 0.0 && (peak - 1.0 / (3.0 * (2.0 * std::f64::consts::PI).sqrt())).abs() < 1e-9
+        );
         // cdf(均值)=0.5
         assert!((g.cdf(2.0) - 0.5).abs() < 1e-6);
         // ppf 是 cdf 的反函数

@@ -104,9 +104,7 @@ pub fn file_exists(path: &Path) -> bool {
 
 /// 路径是否存在且为目录。
 pub fn dir_exists(path: &Path) -> bool {
-    std::fs::metadata(path)
-        .map(|m| m.is_dir())
-        .unwrap_or(false)
+    std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
 }
 
 /// [`exists`] 的别名(Go 版 `PathExist`)。
@@ -116,7 +114,9 @@ pub fn path_exist(path: &Path) -> bool {
 
 /// 是否为非空的普通文件。
 pub fn is_nonempty_file(path: &Path) -> bool {
-    std::fs::metadata(path).map(|m| m.is_file() && m.len() > 0).unwrap_or(false)
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.len() > 0)
+        .unwrap_or(false)
 }
 
 /// 是否为内容非空的目录。
@@ -156,10 +156,7 @@ pub fn is_readable(path: &Path) -> bool {
 
 /// 文件是否可写(实际打开测试)。
 pub fn is_writable(path: &Path) -> bool {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(path)
-        .is_ok()
+    std::fs::OpenOptions::new().write(true).open(path).is_ok()
 }
 
 /// 文件是否可追加(实际打开测试)。

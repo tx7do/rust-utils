@@ -251,11 +251,16 @@ pub fn execute_parallel(
     if tasks.is_empty() {
         return Ok(());
     }
-    let limit = if options.limit == 0 { 20 } else { options.limit };
+    let limit = if options.limit == 0 {
+        20
+    } else {
+        options.limit
+    };
     let deadline = options.timeout.map(|t| Instant::now() + t);
 
     let queue = Arc::new((StdMutex::new(VecDeque::from(tasks)), Condvar::new()));
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(), Box<dyn std::error::Error + Send + Sync>>>();
+    let (tx, rx) =
+        std::sync::mpsc::channel::<Result<(), Box<dyn std::error::Error + Send + Sync>>>();
     let total = {
         let (q, _) = &*queue;
         q.lock().unwrap().len()
@@ -278,7 +283,7 @@ pub fn execute_parallel(
 
             let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
             for attempt in 0..=retry {
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task())) {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(&task)) {
                     Ok(Ok(())) => {
                         last_err = None;
                         break;
@@ -379,9 +384,21 @@ mod tests {
 
     fn orders() -> Vec<Order> {
         vec![
-            Order { id: 1, user_name: None, tags: vec![] },
-            Order { id: 2, user_name: None, tags: vec![] },
-            Order { id: 3, user_name: None, tags: vec![] },
+            Order {
+                id: 1,
+                user_name: None,
+                tags: vec![],
+            },
+            Order {
+                id: 2,
+                user_name: None,
+                tags: vec![],
+            },
+            Order {
+                id: 3,
+                user_name: None,
+                tags: vec![],
+            },
         ]
     }
 
@@ -392,7 +409,12 @@ mod tests {
     #[test]
     fn test_populate() {
         let mut items = orders();
-        populate(&mut items, &users(), |o| o.id, |o, name| o.user_name = Some(name));
+        populate(
+            &mut items,
+            &users(),
+            |o| o.id,
+            |o, name| o.user_name = Some(name),
+        );
         assert_eq!(items[0].user_name.as_deref(), Some("张三"));
         assert_eq!(items[1].user_name.as_deref(), Some("李四"));
         assert_eq!(items[2].user_name, None);
@@ -400,8 +422,17 @@ mod tests {
 
     #[test]
     fn test_populate_one() {
-        let mut item = Order { id: 2, user_name: None, tags: vec![] };
-        populate_one(&mut item, &users(), |o| o.id, |o, name| o.user_name = Some(name));
+        let mut item = Order {
+            id: 2,
+            user_name: None,
+            tags: vec![],
+        };
+        populate_one(
+            &mut item,
+            &users(),
+            |o| o.id,
+            |o, name| o.user_name = Some(name),
+        );
         assert_eq!(item.user_name.as_deref(), Some("李四"));
     }
 
@@ -433,7 +464,11 @@ mod tests {
             children: vec![Node {
                 id: 2,
                 label: None,
-                children: vec![Node { id: 3, label: None, children: vec![] }],
+                children: vec![Node {
+                    id: 3,
+                    label: None,
+                    children: vec![],
+                }],
             }],
         };
         let labels: HashMap<u32, String> =
@@ -461,7 +496,11 @@ mod tests {
         let mut tree = Node {
             id: 1,
             tags: vec![],
-            children: vec![Node { id: 2, tags: vec![], children: vec![] }],
+            children: vec![Node {
+                id: 2,
+                tags: vec![],
+                children: vec![],
+            }],
         };
         populate_tree_multi(
             std::slice::from_mut(&mut tree),
@@ -477,17 +516,16 @@ mod tests {
     #[test]
     fn test_execute_parallel() {
         let tasks: Vec<ParallelTask> = (0..50)
-            .map(|i| {
-                Box::new(move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-                    if i % 2 == 0 {
-                        Ok(())
-                    } else {
-                        Ok(())
-                    }
-                }) as ParallelTask
-            })
+            .map(|_| Box::new(|| Ok(())) as ParallelTask)
             .collect();
-        execute_parallel(tasks, ParallelOptions { limit: 4, ..Default::default() }).unwrap();
+        execute_parallel(
+            tasks,
+            ParallelOptions {
+                limit: 4,
+                ..Default::default()
+            },
+        )
+        .unwrap();
     }
 
     #[test]
@@ -500,8 +538,14 @@ mod tests {
             Err("boom".into())
         });
         let ok: ParallelTask = Box::new(|| Ok(()));
-        let err = execute_parallel(vec![failing, ok], ParallelOptions { retry: 2, ..Default::default() })
-            .unwrap_err();
+        let err = execute_parallel(
+            vec![failing, ok],
+            ParallelOptions {
+                retry: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, ParallelError::Task(_)));
         assert_eq!(attempts.load(Ordering::Relaxed), 3); // 1 次原始 + 2 次重试
     }
@@ -514,7 +558,10 @@ mod tests {
         });
         let err = execute_parallel(
             vec![slow],
-            ParallelOptions { timeout: Some(Duration::from_millis(50)), ..Default::default() },
+            ParallelOptions {
+                timeout: Some(Duration::from_millis(50)),
+                ..Default::default()
+            },
         )
         .unwrap_err();
         assert!(matches!(err, ParallelError::Timeout));
