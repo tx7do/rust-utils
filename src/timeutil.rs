@@ -5,6 +5,9 @@
 //! Go 版中大量的 `*Ptr` 指针转换与 protobuf Timestamp 转换未移植
 //! ——在 Rust 里前者是 `Option`,后者属于 prost 的领域。
 //!
+//! 所有依赖"当前时间"的区间函数都提供 `*_at(now)` 变体,
+//! 支持注入时钟做确定性测试。
+//!
 //! ```
 //! use rust_utils::timeutil;
 //!
@@ -36,14 +39,24 @@ fn day_range(now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {
     (start, end)
 }
 
+/// 获取区间时间 —— 今天;以 `now` 为当前时间(便于测试)。
+pub fn get_today_range_at(now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {
+    day_range(now)
+}
+
 /// 获取区间时间 —— 今天。
 pub fn get_today_range_time() -> (DateTime<Local>, DateTime<Local>) {
-    day_range(Local::now())
+    get_today_range_at(Local::now())
+}
+
+/// 获取区间时间 —— 昨天;以 `now` 为当前时间。
+pub fn get_yesterday_range_at(now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {
+    day_range(now - Duration::days(1))
 }
 
 /// 获取区间时间 —— 昨天。
 pub fn get_yesterday_range_time() -> (DateTime<Local>, DateTime<Local>) {
-    day_range(Local::now() - Duration::days(1))
+    get_yesterday_range_at(Local::now())
 }
 
 fn month_range(now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {
@@ -66,20 +79,30 @@ fn days_in_month(year: i32, month: u32) -> u32 {
         .unwrap_or(30)
 }
 
-/// 获取区间时间 —— 本月。
-pub fn get_current_month_range_time() -> (DateTime<Local>, DateTime<Local>) {
-    month_range(Local::now())
+/// 获取区间时间 —— 本月;以 `now` 为当前时间。
+pub fn get_current_month_range_at(now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {
+    month_range(now)
 }
 
-/// 获取区间时间 —— 上个月。
-pub fn get_last_month_range_time() -> (DateTime<Local>, DateTime<Local>) {
-    let now = Local::now();
+/// 获取区间时间 —— 本月。
+pub fn get_current_month_range_time() -> (DateTime<Local>, DateTime<Local>) {
+    get_current_month_range_at(Local::now())
+}
+
+/// 获取区间时间 —— 上个月;以 `now` 为当前时间。
+/// 当前月为一月时回落到去年十二月。
+pub fn get_last_month_range_at(now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {
     let prev = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
         .and_then(|d| d.checked_sub_months(chrono::Months::new(1)))
         .and_then(|d| d.and_hms_opt(12, 0, 0))
         .and_then(|t| Local.from_local_datetime(&t).single())
         .unwrap_or(now);
     month_range(prev)
+}
+
+/// 获取区间时间 —— 上个月。
+pub fn get_last_month_range_time() -> (DateTime<Local>, DateTime<Local>) {
+    get_last_month_range_at(Local::now())
 }
 
 fn year_range(year: i32) -> (DateTime<Local>, DateTime<Local>) {
@@ -94,14 +117,24 @@ fn year_range(year: i32) -> (DateTime<Local>, DateTime<Local>) {
     (first, end)
 }
 
+/// 获取区间时间 —— 今年;以 `now` 为当前时间。
+pub fn get_current_year_range_at(now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {
+    year_range(now.year())
+}
+
 /// 获取区间时间 —— 今年。
 pub fn get_current_year_range_time() -> (DateTime<Local>, DateTime<Local>) {
-    year_range(Local::now().year())
+    get_current_year_range_at(Local::now())
+}
+
+/// 获取区间时间 —— 去年;以 `now` 为当前时间。
+pub fn get_last_year_range_at(now: DateTime<Local>) -> (DateTime<Local>, DateTime<Local>) {
+    year_range(now.year() - 1)
 }
 
 /// 获取区间时间 —— 去年。
 pub fn get_last_year_range_time() -> (DateTime<Local>, DateTime<Local>) {
-    year_range(Local::now().year() - 1)
+    get_last_year_range_at(Local::now())
 }
 
 macro_rules! range_string {
@@ -344,6 +377,112 @@ mod tests {
         // 同一天内不论时刻,取整后都是 0
         let same_day = Local.with_ymd_and_hms(2023, 5, 20, 23, 59, 0).unwrap();
         assert_eq!(time_difference_days(start, same_day), 0);
+    }
+
+    #[test]
+    fn test_today_range_injected() {
+        let now = Local.with_ymd_and_hms(2023, 5, 23, 15, 4, 5).unwrap();
+        let (start, end) = get_today_range_at(now);
+        assert_eq!(
+            start.format(DATETIME_LAYOUT).to_string(),
+            "2023-05-23 00:00:00"
+        );
+        assert_eq!(
+            end.format(DATETIME_LAYOUT).to_string(),
+            "2023-05-23 23:59:59"
+        );
+    }
+
+    #[test]
+    fn test_yesterday_across_boundaries() {
+        // 跨年:2024-01-01 的昨天是 2023-12-31
+        let new_year = Local.with_ymd_and_hms(2024, 1, 1, 0, 30, 0).unwrap();
+        let (s, e) = get_yesterday_range_at(new_year);
+        assert_eq!((s.year(), s.month(), s.day()), (2023, 12, 31), "跨年昨天");
+        assert_eq!((e.year(), e.month(), e.day()), (2023, 12, 31));
+
+        // 跨月:2024-03-01 的昨天是闰年 2 月 29 日
+        let march_first = Local.with_ymd_and_hms(2024, 3, 1, 12, 0, 0).unwrap();
+        let (s2, e2) = get_yesterday_range_at(march_first);
+        assert_eq!((s2.year(), s2.month(), s2.day()), (2024, 2, 29));
+        assert_eq!((e2.year(), e2.month(), e2.day()), (2024, 2, 29));
+    }
+
+    #[test]
+    fn test_last_month_across_year_boundary() {
+        // 1 月的上个月是去年 12 月
+        let now = Local.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
+        let (start, end) = get_last_month_range_at(now);
+        assert_eq!((start.year(), start.month(), start.day()), (2023, 12, 1));
+        assert_eq!((end.year(), end.month(), end.day()), (2023, 12, 31));
+        assert_eq!(end.hour(), 23);
+        assert_eq!(end.minute(), 59);
+    }
+
+    #[test]
+    fn test_last_month_february_lengths() {
+        // 3 月看 2 月:闰年 29 天,平年 28 天
+        let leap = Local.with_ymd_and_hms(2024, 3, 10, 0, 0, 0).unwrap();
+        let (s, e) = get_last_month_range_at(leap);
+        assert_eq!((s.year(), s.month(), s.day()), (2024, 2, 1));
+        assert_eq!((e.year(), e.month(), e.day()), (2024, 2, 29));
+
+        let plain = Local.with_ymd_and_hms(2023, 3, 10, 0, 0, 0).unwrap();
+        let (s2, e2) = get_last_month_range_at(plain);
+        assert_eq!((s2.year(), s2.month(), s2.day()), (2023, 2, 1));
+        assert_eq!((e2.year(), e2.month(), e2.day()), (2023, 2, 28));
+    }
+
+    #[test]
+    fn test_current_month_range_injected() {
+        // 四月 30 天
+        let april = Local.with_ymd_and_hms(2024, 4, 10, 23, 0, 0).unwrap();
+        let (s, e) = get_current_month_range_at(april);
+        assert_eq!((s.year(), s.month(), s.day()), (2024, 4, 1));
+        assert_eq!((e.year(), e.month(), e.day()), (2024, 4, 30));
+
+        // 十二月取整不跨年
+        let dec = Local.with_ymd_and_hms(2023, 12, 31, 12, 0, 0).unwrap();
+        let (s2, e2) = get_current_month_range_at(dec);
+        assert_eq!((s2.year(), s2.month(), s2.day()), (2023, 12, 1));
+        assert_eq!((e2.year(), e2.month(), e2.day()), (2023, 12, 31));
+    }
+
+    #[test]
+    fn test_year_ranges_injected() {
+        let now = Local.with_ymd_and_hms(2024, 6, 15, 0, 0, 0).unwrap();
+        let (s, e) = get_current_year_range_at(now);
+        assert_eq!((s.year(), s.month(), s.day()), (2024, 1, 1));
+        assert_eq!((e.year(), e.month(), e.day()), (2024, 12, 31));
+
+        let (ls, le) = get_last_year_range_at(now);
+        assert_eq!((ls.year(), ls.month(), ls.day()), (2023, 1, 1));
+        assert_eq!((le.year(), le.month(), le.day()), (2023, 12, 31));
+    }
+
+    #[test]
+    fn test_string_variants_consistent_with_injected_time() {
+        // 字符串变体就是 *_at 结果的格式化:抽今天/上月验证一致性
+        let now = Local.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
+        let (ds, de) = {
+            let (s, e) = get_last_month_range_at(now);
+            (
+                s.format(DATE_LAYOUT).to_string(),
+                e.format(DATE_LAYOUT).to_string(),
+            )
+        };
+        assert_eq!(ds, "2023-12-01");
+        assert_eq!(de, "2023-12-31");
+
+        let (ts, te) = {
+            let (s, e) = get_last_month_range_at(now);
+            (
+                s.format(DATETIME_LAYOUT).to_string(),
+                e.format(DATETIME_LAYOUT).to_string(),
+            )
+        };
+        assert_eq!(ts, "2023-12-01 00:00:00");
+        assert_eq!(te, "2023-12-31 23:59:59");
     }
 
     #[test]
