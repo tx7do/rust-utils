@@ -293,6 +293,29 @@ mod tests {
     }
 
     #[test]
+    fn test_aes_cbc_from_hex() {
+        let key_hex = "000102030405060708090a0b0c0d0e0f";
+        let iv_hex = "101112131415161718191a1b1c1d1e1f";
+        let cipher = AesCipher::from_hex(key_hex, iv_hex).unwrap();
+        let sealed = cipher.encrypt(b"hex key").unwrap();
+        assert_eq!(cipher.decrypt(&sealed).unwrap(), b"hex key");
+        // 非法十六进制 / 错误长度
+        assert!(AesCipher::from_hex("zz", iv_hex).is_err());
+        assert!(AesCipher::from_hex("00", iv_hex).is_err());
+    }
+
+    #[test]
+    fn test_hmac_set_key() {
+        let mut mac = Hmac::new("key-one");
+        let sig1 = to_hex(&mac.sum(b"data"));
+        mac.set_key("key-two");
+        let sig2 = to_hex(&mac.sum(b"data"));
+        assert_ne!(sig1, sig2);
+        assert!(mac.verify(b"data", &sig2));
+        assert!(!mac.verify(b"data", &sig1));
+    }
+
+    #[test]
     fn test_aes_gcm_roundtrip() {
         let key = AesGcmCipher::generate_key().unwrap();
         let cipher = AesGcmCipher::new(key).unwrap();

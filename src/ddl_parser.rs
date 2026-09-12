@@ -721,4 +721,637 @@ mod tests {
         assert!(parse_create_table("CREATE TABLE t").is_err()); // 没有括号块
         assert!(parse_create_table("CREATE TABLE t (id INT").is_err()); // 括号不匹配
     }
+
+    #[test]
+    fn test_mysql_with_engine_and_charset() {
+        let sql = "CREATE TABLE products (\
+            id INT AUTO_INCREMENT PRIMARY KEY, \
+            name VARCHAR(100) NOT NULL COMMENT '产品名称', \
+            price DECIMAL(10,2) DEFAULT 0.00\
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.name, "products");
+        assert_eq!(table.engine, "innodb");
+        assert_eq!(table.charset, "utf8mb4");
+        assert!(table.columns[0].primary_key);
+        assert_eq!(table.columns[1].comment, "产品名称");
+        assert_eq!(table.columns[2].default, "0.00");
+    }
+
+    #[test]
+    fn test_multiple_engine_formats() {
+        let cases = [
+            (
+                "CREATE TABLE t1 (id INT) ENGINE=InnoDB CHARSET=utf8",
+                "innodb",
+                "utf8",
+            ),
+            (
+                "CREATE TABLE t2 (id INT) ENGINE=MyISAM DEFAULT CHARSET=latin1",
+                "myisam",
+                "latin1",
+            ),
+            ("CREATE TABLE t3 (id INT) ENGINE=Memory", "memory", ""),
+            ("CREATE TABLE t4 (id INT)", "", ""),
+        ];
+        for (sql, engine, charset) in cases {
+            let table = parse_create_table(sql).unwrap();
+            assert_eq!(table.engine, engine, "sql: {sql}");
+            assert_eq!(table.charset, charset, "sql: {sql}");
+        }
+    }
+
+    #[test]
+    fn test_case_insensitive() {
+        let sql = "create table Users (\n ID int primary key,\n NAME varchar(100) NOT NULL\n)";
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.name, "users");
+        assert_eq!(table.columns[0].name, "id");
+        assert_eq!(table.columns[1].name, "name");
+    }
+
+    #[test]
+    fn test_nullable_fields() {
+        let sql = "CREATE TABLE test (field1 INT NULL, field2 INT NOT NULL, field3 INT)";
+        let table = parse_create_table(sql).unwrap();
+        assert!(table.columns[0].nullable); // 显式 NULL
+        assert!(!table.columns[1].nullable); // NOT NULL
+        assert!(table.columns[2].nullable); // 默认可空
+    }
+
+    #[test]
+    fn test_default_values() {
+        let sql = "CREATE TABLE settings (\
+            id INT PRIMARY KEY, \
+            timeout INT DEFAULT 30, \
+            name VARCHAR(50) DEFAULT 'unknown', \
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \
+            is_enabled BOOLEAN DEFAULT false\
+        )";
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns[0].default, "");
+        assert_eq!(table.columns[1].default, "30");
+        assert_eq!(table.columns[2].default, "'unknown'"); // 引号保留(与 Go 一致)
+        assert!(!table.columns[3].default.is_empty());
+        assert_eq!(table.columns[4].default, "false");
+    }
+
+    #[test]
+    fn test_invalid_sql() {
+        let cases = [
+            "CREATE TABLE (id INT)",      // 没有表名
+            "CREATE TABLE users",         // 没有括号
+            "CREATE TABLE users (id INT", // 括号不匹配
+            "SELECT * FROM users",        // 不是 CREATE TABLE
+        ];
+        for sql in cases {
+            assert!(parse_create_table(sql).is_err(), "should error: {sql}");
+        }
+    }
+
+    #[test]
+    fn test_empty_table() {
+        let table = parse_create_table("CREATE TABLE empty_table ()").unwrap();
+        assert_eq!(table.name, "empty_table");
+        assert!(table.columns.is_empty());
+    }
+
+    #[test]
+    fn test_complex_real_world() {
+        let sql = concat!(
+            "/* 用户订单表 */\n",
+            "CREATE TABLE IF NOT EXISTS user_orders (\n",
+            "  order_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '订单ID',\n",
+            "  user_id BIGINT NOT NULL COMMENT '用户ID',\n",
+            "  order_number VARCHAR(50) NOT NULL COMMENT '订单号',\n",
+            "  total_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00 COMMENT '总金额',\n",
+            "  status VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT '订单状态',\n",
+            "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n",
+            "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',\n",
+            "  deleted_at TIMESTAMP NULL COMMENT '删除时间',\n",
+            "  INDEX idx_user_id (user_id),\n",
+            "  INDEX idx_order_number (order_number),\n",
+            "  CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)\n",
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户订单表';\n"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.name, "user_orders");
+        assert_eq!(table.engine, "innodb");
+        assert_eq!(table.charset, "utf8mb4");
+        assert!(table.columns.len() >= 6, "got {}", table.columns.len());
+        assert_eq!(table.columns[0].name, "order_id");
+        assert!(table.columns[0].primary_key);
+        assert_eq!(table.columns[0].comment, "订单ID");
+        let total = table
+            .columns
+            .iter()
+            .find(|c| c.name == "total_amount")
+            .unwrap();
+        assert_eq!(total.default, "0.00");
+        assert!(!total.nullable);
+    }
+
+    #[test]
+    fn test_mysql_engine_types() {
+        for engine in ["InnoDB", "MyISAM", "Memory", "Archive", "CSV"] {
+            let sql = format!("CREATE TABLE test (id INT) ENGINE={engine}");
+            let table = parse_create_table(&sql).unwrap();
+            assert_eq!(table.engine, engine.to_lowercase(), "engine: {engine}");
+        }
+    }
+
+    #[test]
+    fn test_mysql_charset_and_collation() {
+        let cases = [
+            ("CREATE TABLE t (id INT) CHARSET=utf8", "utf8"),
+            ("CREATE TABLE t (id INT) DEFAULT CHARSET=utf8mb4", "utf8mb4"),
+            ("CREATE TABLE t (id INT) CHARACTER SET latin1", "latin1"),
+        ];
+        for (sql, charset) in cases {
+            let table = parse_create_table(sql).unwrap();
+            assert_eq!(table.charset, charset, "sql: {sql}");
+        }
+    }
+
+    #[test]
+    fn test_mysql_data_types() {
+        let sql = concat!(
+            "CREATE TABLE mysql_types (",
+            " tiny_col TINYINT, small_col SMALLINT, medium_col MEDIUMINT, int_col INT,",
+            " big_col BIGINT, decimal_col DECIMAL(10,2), float_col FLOAT, double_col DOUBLE,",
+            " char_col CHAR(10), varchar_col VARCHAR(255), text_col TEXT,",
+            " mediumtext_col MEDIUMTEXT, longtext_col LONGTEXT, blob_col BLOB,",
+            " date_col DATE, datetime_col DATETIME, timestamp_col TIMESTAMP, year_col YEAR,",
+            " enum_col ENUM('a','b','c'), set_col SET('x','y','z'), json_col JSON",
+            ")"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.name, "mysql_types");
+        let type_of = |n: &str| {
+            table
+                .columns
+                .iter()
+                .find(|c| c.name == n)
+                .map(|c| c.column_type.clone())
+                .unwrap_or_default()
+        };
+        assert!(type_of("tiny_col").contains("tinyint"));
+        assert!(type_of("varchar_col").contains("varchar"));
+        assert!(type_of("decimal_col").contains("decimal"));
+        assert!(type_of("json_col").contains("json"));
+        // ENUM / SET 里的逗号不能被当成字段分隔符
+        assert!(type_of("enum_col").contains("enum"));
+        assert!(type_of("set_col").contains("set"));
+    }
+
+    #[test]
+    fn test_mysql_timestamps_on_update() {
+        let sql = concat!(
+            "CREATE TABLE events (",
+            " id INT PRIMARY KEY,",
+            " created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,",
+            " updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+            ")"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns.len(), 3);
+        assert!(table.columns[1]
+            .default
+            .to_lowercase()
+            .contains("current_timestamp"));
+        assert!(table.columns[2]
+            .default
+            .to_lowercase()
+            .contains("current_timestamp"));
+    }
+
+    #[test]
+    fn test_mysql_unsigned_and_zerofill() {
+        let sql = concat!(
+            "CREATE TABLE test (",
+            " id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,",
+            " amount DECIMAL(10,2) UNSIGNED,",
+            " code INT ZEROFILL",
+            ")"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns.len(), 3);
+        assert!(table.columns[0].primary_key);
+    }
+
+    #[test]
+    fn test_mysql_fulltext_index() {
+        let sql = concat!(
+            "CREATE TABLE articles (",
+            " id INT PRIMARY KEY,",
+            " title VARCHAR(200),",
+            " content TEXT,",
+            " FULLTEXT INDEX ft_content (content),",
+            " FULLTEXT INDEX ft_title_content (title, content)",
+            ") ENGINE=InnoDB"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns.len(), 3); // FULLTEXT 索引被跳过
+    }
+
+    #[test]
+    fn test_mysql_partitioned_table() {
+        let sql = concat!(
+            "CREATE TABLE sales (",
+            " id INT, sale_date DATE, amount DECIMAL(10,2)",
+            ") ENGINE=InnoDB",
+            " PARTITION BY RANGE(YEAR(sale_date)) (",
+            " PARTITION p0 VALUES LESS THAN (2020),",
+            " PARTITION p1 VALUES LESS THAN (2021)",
+            ")"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.name, "sales");
+        assert_eq!(table.engine, "innodb");
+        assert_eq!(table.columns.len(), 3);
+    }
+
+    #[test]
+    fn test_postgresql_serial_types() {
+        let sql =
+            "CREATE TABLE users (id SERIAL PRIMARY KEY, big_id BIGSERIAL, small_id SMALLSERIAL)";
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns.len(), 3);
+        assert!(table.columns[0]
+            .column_type
+            .to_lowercase()
+            .contains("serial"));
+    }
+
+    #[test]
+    fn test_postgresql_array_types() {
+        let sql =
+            "CREATE TABLE test (id SERIAL PRIMARY KEY, tags TEXT[], numbers INTEGER[], matrix INTEGER[][])";
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns.len(), 4);
+    }
+
+    #[test]
+    fn test_postgresql_check_constraint() {
+        let sql = concat!(
+            "CREATE TABLE products (",
+            " id SERIAL PRIMARY KEY,",
+            " name VARCHAR(100) NOT NULL,",
+            " price DECIMAL(10,2) CHECK (price > 0),",
+            " quantity INT CHECK (quantity >= 0)",
+            ")"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns.len(), 4);
+    }
+
+    #[test]
+    fn test_postgresql_function_defaults() {
+        let sql = concat!(
+            "CREATE TABLE users (",
+            " id SERIAL PRIMARY KEY,",
+            " created_at TIMESTAMP DEFAULT NOW(),",
+            " updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,",
+            " uuid UUID DEFAULT gen_random_uuid()",
+            ")"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert!(!table.columns[1].default.is_empty());
+        assert!(!table.columns[3].default.is_empty());
+    }
+
+    #[test]
+    fn test_postgresql_generated_columns() {
+        let sql = concat!(
+            "CREATE TABLE people (",
+            " id SERIAL PRIMARY KEY,",
+            " first_name TEXT, last_name TEXT,",
+            " full_name TEXT GENERATED ALWAYS AS (first_name || ' ' || last_name) STORED",
+            ")"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert!(table.columns.len() >= 3);
+    }
+
+    #[test]
+    fn test_postgresql_inherited_tables() {
+        let sql = concat!(
+            "CREATE TABLE employees (",
+            " id SERIAL PRIMARY KEY, name VARCHAR(100), salary DECIMAL(10,2)",
+            ") INHERITS (persons)"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.name, "employees");
+        assert_eq!(table.columns.len(), 3);
+    }
+
+    #[test]
+    fn test_sqlite_autoincrement() {
+        let sql = "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)";
+        let table = parse_create_table(sql).unwrap();
+        assert!(table.columns[0].primary_key);
+    }
+
+    #[test]
+    fn test_sqlite_data_types() {
+        let sql = concat!(
+            "CREATE TABLE sqlite_types (",
+            " int_col INTEGER, text_col TEXT, real_col REAL, blob_col BLOB, numeric_col NUMERIC",
+            ")"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns.len(), 5);
+        let type_of = |n: &str| {
+            table
+                .columns
+                .iter()
+                .find(|c| c.name == n)
+                .map(|c| c.column_type.clone())
+                .unwrap_or_default()
+        };
+        assert!(type_of("int_col").contains("integer"));
+        assert!(type_of("text_col").contains("text"));
+        assert!(type_of("real_col").contains("real"));
+        assert!(type_of("blob_col").contains("blob"));
+    }
+
+    #[test]
+    fn test_sqlite_without_rowid() {
+        let sql = "CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID";
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.name, "config");
+        assert_eq!(table.columns.len(), 2);
+        assert!(table.columns[0].primary_key);
+    }
+
+    #[test]
+    fn test_sqlite_paren_default() {
+        let sql = concat!(
+            "CREATE TABLE logs (",
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,",
+            " message TEXT NOT NULL,",
+            " created_at TEXT DEFAULT (datetime('now')),",
+            " level TEXT DEFAULT 'INFO'",
+            ")"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns.len(), 4);
+        assert!(table.columns[2].default.contains("datetime"));
+        assert_eq!(table.columns[3].default, "'INFO'");
+    }
+
+    #[test]
+    fn test_sqlite_strict_tables() {
+        let sql =
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER) STRICT";
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.columns.len(), 3);
+    }
+
+    #[test]
+    fn test_crossdb_nullable_constraints() {
+        for sql in [
+            "CREATE TABLE t (id INT NOT NULL, name VARCHAR(50) NULL)",
+            "CREATE TABLE t (id INTEGER NOT NULL, name TEXT)",
+        ] {
+            let table = parse_create_table(sql).unwrap();
+            assert!(!table.columns[0].nullable, "sql: {sql}");
+        }
+    }
+
+    #[test]
+    fn test_crossdb_primary_key_variants() {
+        let cases = [
+            "CREATE TABLE t (id INT PRIMARY KEY, name TEXT)",
+            "CREATE TABLE t (id1 INT, id2 INT, name TEXT, PRIMARY KEY(id1, id2))",
+            "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY)",
+            "CREATE TABLE t (id SERIAL PRIMARY KEY)",
+            "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT)",
+        ];
+        for sql in cases {
+            let table = parse_create_table(sql).unwrap();
+            assert!(
+                table.columns.iter().any(|c| c.primary_key),
+                "should have a primary key: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_crossdb_quoted_identifiers() {
+        let cases = [
+            (
+                "CREATE TABLE `my_table` (`my_column` INT)",
+                "my_table",
+                "my_column",
+            ),
+            (
+                "CREATE TABLE \"my_table\" (\"my_column\" INT)",
+                "my_table",
+                "my_column",
+            ),
+            (
+                "CREATE TABLE `table1` (\"col1\" INT, `col2` TEXT)",
+                "table1",
+                "col1",
+            ),
+        ];
+        for (sql, table_name, col_name) in cases {
+            let table = parse_create_table(sql).unwrap();
+            assert_eq!(table.name, table_name, "sql: {sql}");
+            assert_eq!(table.columns[0].name, col_name, "sql: {sql}");
+        }
+    }
+
+    #[test]
+    fn test_parse_create_tables_semicolon_in_string() {
+        let sql = concat!(
+            "\n",
+            "CREATE TABLE messages (\n",
+            " id INT PRIMARY KEY,\n",
+            " content VARCHAR(100) DEFAULT 'a; b; c'\n",
+            ");\n",
+            "CREATE TABLE audit (id INT PRIMARY KEY, note TEXT);\n"
+        );
+        let tables = parse_create_tables(sql).unwrap();
+        assert_eq!(tables.len(), 2); // 字符串里的分号不会切断语句
+        assert_eq!(tables[0].name, "messages");
+        assert_eq!(tables[1].name, "audit");
+    }
+
+    #[test]
+    fn test_table_comment_double_quotes() {
+        let sql =
+            "CREATE TABLE products (id INT PRIMARY KEY, name VARCHAR(255)) COMMENT=\"产品表\"";
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.comment, "产品表");
+    }
+
+    #[test]
+    fn test_collation_and_collate_keyword() {
+        let t1 = parse_create_table(
+            "CREATE TABLE orders (id INT PRIMARY KEY, content TEXT) COLLATION=utf8mb4_unicode_ci",
+        )
+        .unwrap();
+        assert_eq!(t1.collation, "utf8mb4_unicode_ci");
+
+        let t2 = parse_create_table(
+            "CREATE TABLE articles (id INT PRIMARY KEY, title VARCHAR(255)) COLLATE=utf8mb4_general_ci",
+        )
+        .unwrap();
+        assert_eq!(t2.collation, "utf8mb4_general_ci");
+    }
+
+    #[test]
+    fn test_all_table_attributes_combined() {
+        let sql = concat!(
+            "CREATE TABLE users_v2 (",
+            " id INT PRIMARY KEY, name VARCHAR(255) NOT NULL, email VARCHAR(255)",
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表'"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.engine, "innodb");
+        assert_eq!(table.charset, "utf8mb4");
+        assert_eq!(table.collation, "utf8mb4_unicode_ci");
+        assert_eq!(table.comment, "用户表");
+    }
+
+    #[test]
+    fn test_comment_with_special_chars() {
+        let sql =
+            "CREATE TABLE config (id INT PRIMARY KEY, value TEXT) COMMENT='配置表: 用于存储系统配置'";
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.comment, "配置表: 用于存储系统配置");
+    }
+
+    #[test]
+    fn test_latin1_collation() {
+        let sql = concat!(
+            "CREATE TABLE archive (",
+            " id INT PRIMARY KEY, data VARCHAR(255)",
+            ") DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.charset, "latin1");
+        assert_eq!(table.collation, "latin1_general_ci");
+    }
+
+    #[test]
+    fn test_decimal_with_space_and_field_comments() {
+        // 来自真实解析错误报告:DECIMAL(10, 2) 含空格 + 全字段 COMMENT + 表 COMMENT 无等号
+        let sql = concat!(
+            "\n",
+            "CREATE TABLE products (\n",
+            " id INT PRIMARY KEY COMMENT 'Product ID',\n",
+            " name VARCHAR(255) NOT NULL COMMENT 'Product Name',\n",
+            " price DECIMAL(10, 2) NOT NULL COMMENT 'Product Price',\n",
+            " stock INT DEFAULT 0 COMMENT 'Stock Quantity'\n",
+            ") COMMENT 'Products Table';\n"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.name, "products");
+        assert_eq!(table.comment, "Products Table");
+        assert_eq!(table.columns.len(), 4);
+
+        let c = &table.columns;
+        assert_eq!(c[0].column_type, "int");
+        assert!(c[0].primary_key);
+        assert_eq!(c[0].comment, "Product ID");
+        assert_eq!(c[1].column_type, "varchar(255)");
+        assert!(!c[1].nullable);
+        assert_eq!(c[1].comment, "Product Name");
+        assert!(c[2].column_type.contains("decimal"));
+        assert!(!c[2].nullable);
+        assert_eq!(c[2].comment, "Product Price");
+        assert_eq!(c[3].column_type, "int");
+        assert!(c[3].nullable);
+        assert_eq!(c[3].default, "0");
+        assert_eq!(c[3].comment, "Stock Quantity");
+    }
+
+    #[test]
+    fn test_decimal_variations_with_comments() {
+        let cases = [
+            (
+                "CREATE TABLE t (amount DECIMAL(10, 2) NOT NULL COMMENT 'Amount')",
+                "decimal",
+            ),
+            (
+                "CREATE TABLE t (amount DECIMAL(10,2) NOT NULL COMMENT 'Amount')",
+                "decimal",
+            ),
+            (
+                "CREATE TABLE t (value NUMERIC(12, 4) COMMENT 'Value')",
+                "numeric",
+            ),
+            (
+                "CREATE TABLE t (price DECIMAL(10) COMMENT 'Price')",
+                "decimal",
+            ),
+        ];
+        for (sql, exp) in cases {
+            let table = parse_create_table(sql).unwrap();
+            assert_eq!(table.columns.len(), 1, "sql: {sql}");
+            assert!(table.columns[0].column_type.contains(exp), "sql: {sql}");
+            assert!(!table.columns[0].comment.is_empty(), "sql: {sql}");
+        }
+    }
+
+    #[test]
+    fn test_all_fields_with_comments() {
+        let sql = concat!(
+            "CREATE TABLE users (",
+            " id BIGINT PRIMARY KEY COMMENT '用户ID',",
+            " username VARCHAR(50) NOT NULL UNIQUE COMMENT '用户名',",
+            " email VARCHAR(100) NOT NULL COMMENT '邮箱地址',",
+            " age INT DEFAULT 18 COMMENT '年龄',",
+            " balance DECIMAL(15, 2) DEFAULT 0.00 COMMENT '账户余额',",
+            " is_active BOOLEAN DEFAULT true COMMENT '是否激活',",
+            " created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',",
+            " updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'",
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表'"
+        );
+        let table = parse_create_table(sql).unwrap();
+        assert_eq!(table.name, "users");
+        assert_eq!(table.comment, "用户表");
+        for (i, col) in table.columns.iter().enumerate() {
+            assert!(
+                !col.comment.is_empty(),
+                "column {i} ({}) missing comment",
+                col.name
+            );
+        }
+        let balance = &table.columns[4];
+        assert_eq!(balance.name, "balance");
+        assert_eq!(balance.comment, "账户余额");
+        assert_eq!(balance.default, "0.00");
+        assert!(balance.column_type.contains("decimal"));
+    }
+
+    #[test]
+    fn test_comment_with_special_characters_in_fields() {
+        let cases = [
+            (
+                "CREATE TABLE t (id INT COMMENT 'ID: 主键')",
+                "id",
+                "ID: 主键",
+            ),
+            (
+                "CREATE TABLE t (val INT COMMENT 'Value, important')",
+                "val",
+                "Value, important",
+            ),
+            (
+                "CREATE TABLE t (code VARCHAR(50) COMMENT '代码(编码)')",
+                "code",
+                "代码(编码)",
+            ),
+        ];
+        for (sql, col, cmt) in cases {
+            let table = parse_create_table(sql).unwrap();
+            assert_eq!(table.columns.len(), 1, "sql: {sql}");
+            assert_eq!(table.columns[0].name, col, "sql: {sql}");
+            assert_eq!(table.columns[0].comment, cmt, "sql: {sql}");
+        }
+    }
 }

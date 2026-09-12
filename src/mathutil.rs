@@ -119,6 +119,21 @@ impl Gaussian {
         Gaussian::new(precision_mean / precision, 1.0 / precision)
     }
 
+    /// 均值 μ。
+    pub fn mean(&self) -> f64 {
+        self.mean
+    }
+
+    /// 方差 σ²。
+    pub fn variance(&self) -> f64 {
+        self.variance
+    }
+
+    /// 标准差 σ。
+    pub fn standard_deviation(&self) -> f64 {
+        self.standard_deviation
+    }
+
     /// 概率密度函数 pdf(x)。
     pub fn pdf(&self, x: f64) -> f64 {
         let m = self.standard_deviation * (2.0 * std::f64::consts::PI).sqrt();
@@ -224,6 +239,25 @@ mod tests {
         assert_eq!(a.add(&b), Gaussian::new(1.0, 5.0));
         assert_eq!(a.sub(&b), Gaussian::new(-1.0, 5.0));
         assert_eq!(a.scale(3.0), Gaussian::new(0.0, 9.0));
+    }
+
+    #[test]
+    fn test_gaussian_mul_div() {
+        let a = Gaussian::new(0.0, 1.0);
+        let b = Gaussian::new(2.0, 4.0);
+        // mul:精度加权 mean = (1*0 + 0.25*2)/1.25 = 0.4,var = 1/1.25 = 0.8
+        let m = a.mul(&b);
+        assert!((m.mean() - 0.4).abs() < 1e-12, "mean: {}", m.mean());
+        assert!((m.variance() - 0.8).abs() < 1e-12, "var: {}", m.variance());
+        assert!((m.standard_deviation() - 0.8f64.sqrt()).abs() < 1e-12);
+        // div:mean = (1*0 - 0.25*2)/0.75 = -2/3,var = 1/0.75 = 4/3
+        let d = a.div(&b);
+        assert!((d.mean() + 2.0 / 3.0).abs() < 1e-12, "mean: {}", d.mean());
+        assert!(
+            (d.variance() - 4.0 / 3.0).abs() < 1e-12,
+            "var: {}",
+            d.variance()
+        );
     }
 
     #[test]

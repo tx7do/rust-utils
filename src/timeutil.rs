@@ -334,6 +334,19 @@ mod tests {
     }
 
     #[test]
+    fn test_day_time_difference() {
+        let start = Local.with_ymd_and_hms(2023, 5, 20, 15, 30, 0).unwrap();
+        let end = Local.with_ymd_and_hms(2023, 5, 23, 8, 0, 0).unwrap();
+        // 双方都先取整到当日 00:00:20日 → 23日 = 72 小时
+        assert!((day_time_difference_hours(start, end) - 72.0).abs() < 1e-9);
+        assert_eq!(time_difference_days(start, end), 3);
+        assert_eq!(time_difference_days(start, start), 0);
+        // 同一天内不论时刻,取整后都是 0
+        let same_day = Local.with_ymd_and_hms(2023, 5, 20, 23, 59, 0).unwrap();
+        assert_eq!(time_difference_days(start, same_day), 0);
+    }
+
+    #[test]
     fn test_duration_format() {
         assert_eq!(format_timer(std::time::Duration::new(3_723, 0)), "1h2m3s");
         assert_eq!(format_timer(std::time::Duration::new(125, 0)), "2m5s");

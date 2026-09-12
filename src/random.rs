@@ -522,6 +522,64 @@ mod tests {
     }
 
     #[test]
+    fn test_misc_primitives() {
+        let mut r = Randomizer::new();
+        // bool:500 次应出现两种取值
+        let mut true_count = 0;
+        for _ in 0..500 {
+            true_count += r.bool() as usize;
+        }
+        assert!(
+            true_count > 0 && true_count < 500,
+            "bool stuck: {true_count}"
+        );
+
+        assert_eq!(r.int_n(0), 0);
+        assert!(r.int_n(1) < 1);
+
+        // pick_string
+        let words = ["alpha", "beta", "gamma"];
+        for _ in 0..50 {
+            let picked = r.pick_string(&words).unwrap();
+            assert!(words.contains(&picked));
+        }
+        assert_eq!(r.pick_string(&[]), None);
+
+        // 字母串
+        let s = r.letter_string(20);
+        assert_eq!(s.len(), 20);
+        assert!(s.chars().all(|c| c.is_ascii_alphabetic()));
+
+        // d20
+        for _ in 0..100 {
+            assert!((1..=20).contains(&r.d20()));
+        }
+
+        // jitter_duration
+        let base = Duration::from_millis(1000);
+        let jitter = Duration::from_millis(100);
+        for _ in 0..100 {
+            let d = r.jitter_duration(base, jitter);
+            assert!((900..=1100).contains(&d.as_millis()), "got {d:?}");
+        }
+    }
+
+    #[test]
+    fn test_ip_and_color() {
+        let mut r = Randomizer::new();
+        for _ in 0..50 {
+            let v6 = r.random_ipv6();
+            let groups: Vec<&str> = v6.split(':').collect();
+            assert_eq!(groups.len(), 8, "ipv6: {v6}");
+            assert!(groups
+                .iter()
+                .all(|g| g.len() == 4 && g.chars().all(|c| c.is_ascii_hexdigit())));
+            let _ = r.rgb(); // u8 分量天然在界内,解构即可
+        }
+        assert_eq!(r.color_hex().len(), 7);
+    }
+
+    #[test]
     fn test_free_functions() {
         let _ = float64();
         let _ = int_range(0, 10);

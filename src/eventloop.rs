@@ -1153,4 +1153,58 @@ mod tests {
             self.0.observe_processing_duration(p, e);
         }
     }
+
+    #[test]
+    fn test_inline_callback_mode() {
+        struct Echo;
+        impl EventProcessor<String> for Echo {
+            fn process(&mut self, event: Event<String>) -> EventResult<String> {
+                EventResult::ok(event.data.map(|d| format!("inline: {d}")))
+            }
+        }
+        let loop_ = EventLoop::new(16, Echo, false);
+        loop_.set_callback_inline(true, Some(Duration::from_secs(1)));
+        loop_.start();
+
+        // inline 模式下由事件循环线程直接投递回调(不启动分发线程)
+        let (ev, rx) = new_request_event("req", Some("ping".to_string()));
+        loop_.submit(ev).unwrap();
+        let reply = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        loop_.stop();
+        assert_eq!(reply.data.as_deref(), Some("inline: ping"));
+    }
+
+    #[test]
+    fn test_queue_lengths() {
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let loop_ = EventLoop::new(8, Gated { gate: gate.clone() }, false);
+        loop_.start();
+
+        // blocker 被取走并阻塞在闸门里
+        loop_
+            .submit(Event::new("a", None).with_priority(Priority::High))
+            .unwrap();
+        thread::sleep(Duration::from_millis(50));
+
+        // 三个优先级队列各堆一个
+        loop_
+            .submit(Event::new("h", None).with_priority(Priority::High))
+            .unwrap();
+        loop_
+            .submit(Event::new("m", None).with_priority(Priority::Medium))
+            .unwrap();
+        loop_
+            .submit(Event::new("l", None).with_priority(Priority::Low))
+            .unwrap();
+
+        let ql = loop_.queue_lengths();
+        assert_eq!((ql.high, ql.medium, ql.low), (1, 1, 1));
+
+        Gated::open(&gate);
+        wait_for(|| {
+            let ql = loop_.queue_lengths();
+            (ql.high, ql.medium, ql.low) == (0, 0, 0)
+        });
+        loop_.stop();
+    }
 }

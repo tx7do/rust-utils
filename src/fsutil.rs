@@ -243,6 +243,67 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[test]
+    fn test_link_exists() {
+        let dir = std::env::temp_dir().join(format!("rust-utils-link-{}", std::process::id()));
+        let file = dir.join("target.txt");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&file, b"x").unwrap();
+        let link = dir.join("alias.txt");
+
+        // Windows 上创建符号链接需要开发者模式/管理员权限,失败则跳过
+        #[cfg(unix)]
+        let created = std::os::unix::fs::symlink(&file, &link).is_ok();
+        #[cfg(windows)]
+        let created = std::os::windows::fs::symlink_file(&file, &link).is_ok();
+
+        if created {
+            assert!(link_exists(&link));
+            // file_exists 跟随符号链接(与 Go 的 os.Stat 语义一致)
+            assert!(file_exists(&link));
+            assert!(file_exists(&file));
+            std::fs::remove_file(&link).unwrap();
+        }
+        assert!(!link_exists(&file));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_is_nonempty_executable_file() {
+        let dir = std::env::temp_dir().join(format!("rust-utils-exe-{}", std::process::id()));
+        let file = dir.join("tool.bin");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            &file,
+            b"#!/bin/sh
+",
+        )
+        .unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // 无执行位 → false
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(!is_nonempty_executable_file(&file));
+            // 有执行位 → true
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(is_nonempty_executable_file(&file));
+        }
+        #[cfg(not(unix))]
+        {
+            // Windows 无执行位概念,非空普通文件即可
+            assert!(is_nonempty_executable_file(&file));
+        }
+
+        // 空文件永远不算
+        let empty = dir.join("empty.bin");
+        fs::write(&empty, b"").unwrap();
+        assert!(!is_nonempty_executable_file(&empty));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[cfg(feature = "glob")]
     #[test]
     fn test_match_path() {

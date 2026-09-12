@@ -224,6 +224,42 @@ mod tests {
     }
 
     #[test]
+    fn test_tampered_signature_rejected() {
+        let token = generate_jwt(
+            json!({ "sub": "t", "exp": 4102444800i64 }),
+            SECRET,
+            Algorithm::HS256,
+        )
+        .unwrap();
+        let mut parts: Vec<String> = token.split('.').map(str::to_string).collect();
+        let sig = parts[2].clone();
+        // 翻转签名末字符
+        let last = sig.chars().last().unwrap();
+        let flipped = if last == 'A' { 'B' } else { 'A' };
+        parts[2] = format!("{}{}", &sig[..sig.len() - 1], flipped);
+        let tampered = parts.join(".");
+        assert_ne!(tampered, token);
+        assert!(!verify_jwt(&tampered, SECRET));
+        assert!(parse_jwt_payload(&tampered, SECRET).is_err());
+
+        // 错误密钥同样失败
+        assert!(!verify_jwt(&token, "other-secret"));
+    }
+
+    #[test]
+    fn test_parse_unverified_claims() {
+        let token = generate_jwt(
+            json!({ "sub": "u", "exp": 4102444800i64 }),
+            SECRET,
+            Algorithm::HS256,
+        )
+        .unwrap();
+        let claims = parse_unverified_claims(&token).unwrap();
+        assert_eq!(claims["sub"], "u");
+        assert!(parse_unverified_claims("garbage").is_err());
+    }
+
+    #[test]
     fn test_new_jwt_id() {
         let a = new_jwt_id();
         let b = new_jwt_id();

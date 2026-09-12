@@ -538,6 +538,37 @@ mod tests {
     }
 
     #[test]
+    fn test_snowflake_generate_string() {
+        let node = SnowflakeNode::new(9).unwrap();
+        let a: i64 = node.generate_string().parse().expect("should be numeric");
+        let b: i64 = node.generate_string().parse().expect("should be numeric");
+        assert!(b > a);
+        assert_eq!((a >> 12) & 1023, 9);
+    }
+
+    #[test]
+    fn test_order_id_with_prefix_snowflake() {
+        let id = generate_order_id_with_prefix_snowflake("SO:");
+        assert!(id.starts_with("SO:"));
+        assert!(id["SO:".len()..].parse::<i64>().is_ok());
+
+        let id2 = generate_order_id_with_prefix_snowflake_node(7, "N7-");
+        assert!(id2.starts_with("N7-"));
+        let v: i64 = id2["N7-".len()..].parse().unwrap();
+        assert_eq!((v >> 12) & 1023, 7); // 工作节点位
+    }
+
+    #[test]
+    fn test_format_machine_id_real() {
+        // 依赖平台机器码来源(Windows 注册表 / /etc/machine-id / ioreg),
+        // 读不到的环境下允许 Err。
+        if let Ok(id) = format_machine_id(FormatOption::default()) {
+            assert_eq!(id.len(), 32);
+            assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+    }
+
+    #[test]
     fn test_compact_datetime() {
         // 2026-09-13 08:30:45 UTC = 1788184245? 用已知锚点校验
         let t = UNIX_EPOCH + std::time::Duration::from_secs(0);
