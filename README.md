@@ -46,6 +46,7 @@ rust-utils = "0.1"
 | [`tls`] | tls | `tls` | TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
 | [`geoip`] | geoip | `geoip` | IP 归属地查询三后端:qqwry(GB18030、字段重定向链、省/市切分)、ip2region xdb v2(向量索引+段索引二分、查询器池)、MaxMind mmdb 读取器;数据由调用方加载 |
 | [`translator`] | translator | `translator` | 翻译器四后端:百度(MD5 签名)/阿里(RPC 签名)/谷歌(v1 裸端点、v2/v3 REST 等价)/火山(HMAC-SHA256 派生链);请求构造与签名可离线验证 |
+| [`distlock`] | distlock | `distlock` | 分布式锁:Locker/Lock 抽象与获取选项(Redis 落地用 `distlock-redis`,按 bsm/redislock 协议逐式复刻;etcd 后端未移植) |
 | [`sm`] | crypto(SM 部分) | `sm` | 国密 SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/SM4-CBC |
 
 [`byteutil`]: src/byteutil.rs
@@ -77,6 +78,7 @@ rust-utils = "0.1"
 [`tls`]: src/tls.rs
 [`geoip`]: src/geoip.rs
 [`translator`]: src/translator.rs
+[`distlock`]: src/distlock.rs
 
 ## 示例
 
@@ -237,7 +239,6 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 |---|---|
 | `trans`(指针助手) | Rust 的 `Option<T>` 天然覆盖 |
 | `copierutil` / `mapper` / `structutil` | 基于 Go 反射,在 Rust 中应改用 serde/prost 方案 |
-| `distlock` | 依赖 Redis/etcd,建议单独封装 |
 | `code_generator` | Go `text/template` 生态专属 |
 
 行为修正(相对 Go 版的 bug):
@@ -303,6 +304,25 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
   SDK 自带测试向量、`volc` 为独立预计算的签名链输出、`baidu`
   为独立预计算的 MD5)。
 
+`distlock` 的固有差异:
+
+- etcd locker 未移植(jetcd 的 concurrency 包——session/mutex——在
+  Rust 生态无对应,`etcd-client` 不提供锁抽象,不为此引入重依赖);
+  上游 etcd 路径消费的 `LockOption`(blockWait/maxWaitTime/retryDelay
+  的轮询等待)随之无宿主,选项类型保留在接口签名中,Redis 后端与
+  上游一样忽略它们;
+- 错误以字符串返回;上游的 `ErrNotObtained` 哨兵为
+  `distlock::ERR_NOT_OBTAINED`,按字符串相等判断(上游用
+  `errors.Is`);
+- Redis 后端的线上协议按 bsm/redislock v0.9.4 逐式复刻,其未被上游
+  包装层使用的部分(TTL 查询、`Metadata`/`Token` 自定义选项、
+  `NoRetry`/`ExponentialBackoff` 策略)未移植;
+- 上游 `Obtain` 以调用方 ctx 的 deadline 兜底重试循环,此处固定以
+  锁 TTL 为期限;
+- 上游 `StartRefresh` 返回的 stop 未被调用时,续期协程在无失败的
+  情况下永不退出;Rust 版 `StopHandle` 被丢弃即视作停止(信道断开,
+  线程退出)。
+
 `tls` 与 `fieldmask` 的固有差异:
 
 - `tls` 返回 rustls 的 `ServerConfig`/`ClientConfig` 而非 Go 的
@@ -320,7 +340,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test              # 核心模块测试(零依赖)
-cargo test --all-features  # 全部模块测试(288 单测 + 28 文档测试,其中 1 例标记 ignore 不执行)
+cargo test --all-features  # 全部模块测试(297 单测 + 28 文档测试,其中 1 例标记 ignore 不执行)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```

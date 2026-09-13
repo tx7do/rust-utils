@@ -454,6 +454,7 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
 // ---------------------------------------------------------------------------
 
 /// shortuuid 默认 base57 字母表(去除易混淆的 0/O/1/I/l)。
+#[cfg(feature = "uuid")]
 const SHORTUUID_ALPHABET: &[u8] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 /// 生成 ShortUUID(22 位 base57 编码的 UUID v4)。
@@ -848,6 +849,7 @@ mod tests {
         let v7b = new_guid_v7(false);
         assert!(v7b >= v7a);
     }
+    #[cfg(feature = "uuid")]
     #[test]
     fn test_short_uuid() {
         let s = new_short_uuid();

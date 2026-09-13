@@ -33,6 +33,7 @@
 //! | [`captcha`]      | captcha         | `captcha`(Redis 落地用 `captcha-redis`) |
 //! | [`geoip`]        | geoip           | `geoip`           |
 //! | [`translator`]   | translator      | `translator`      | 翻译器四后端:百度(MD5 签名)/阿里(RPC 签名)/谷歌(v1 裸端点、v2/v3 REST 等价)/火山(HMAC-SHA256 派生链);请求构造与签名可离线验证 |
+//! | [`distlock`]     | distlock        | `distlock`        | 分布式锁:Locker/Lock 抽象与获取选项(Redis 落地用 `distlock-redis`,按 bsm/redislock 协议逐式复刻;etcd 后端未移植) |
 //! | [`jwt`]          | jwtutil         | `jwt`            |
 
 #![allow(clippy::module_inception)]
@@ -55,7 +56,13 @@ pub mod stringutil;
 #[cfg(feature = "bank-card")]
 pub mod bank_card;
 
-// 标准 base64(带填充),供 crypto/captcha 模块共用。
+// 标准 base64(带填充),供 captcha/crypto/sm/translator 模块共用。
+#[cfg(any(
+    feature = "captcha",
+    feature = "crypto",
+    feature = "sm",
+    feature = "translator"
+))]
 pub(crate) mod base64util {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -121,6 +128,8 @@ pub mod captcha;
 pub mod crypto;
 #[cfg(feature = "chrono")]
 pub mod dateutil;
+#[cfg(feature = "distlock")]
+pub mod distlock;
 #[cfg(feature = "fieldmask")]
 pub mod fieldmask;
 #[cfg(feature = "geoip")]

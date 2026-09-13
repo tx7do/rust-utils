@@ -71,6 +71,10 @@ geoip = ["dep:maxminddb", "dep:encoding_rs", "dep:serde"]
 # 翻译器:百度/阿里/谷歌/火山四后端(阻塞 HTTP,ureq;
 # 时间戳与 nonce 复用 chrono/uuid,签名复用 md-5/sha1/hmac/sha2)。
 translator = ["dep:ureq", "dep:md-5", "dep:sha1", "dep:hmac", "dep:sha2", "dep:serde", "dep:serde_json", "dep:chrono", "dep:uuid", "dep:rand"]
+# 分布式锁:Locker/Lock 接口与获取选项(etcd 后端未移植)。
+distlock = []
+# 分布式锁的 Redis 落地(bsm/redislock v0.9.4 的线上协议复刻)。
+distlock-redis = ["distlock", "dep:redis", "dep:getrandom"]
 # Everything above, minus the exotic bits.
 full = [
     "sm",
@@ -90,6 +94,7 @@ full = [
     "tls",
     "geoip",
     "translator",
+    "distlock",
 ]
 
 [dependencies]
