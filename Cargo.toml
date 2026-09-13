@@ -56,9 +56,14 @@ bank-card = []
 
 # 国密 SM3 哈希与 SM4 分组密码(基于 libsm)。
 sm = ["dep:libsm"]
+# 文本验证码服务(数字/字母/算术/中文)+ 内存存储。
+captcha = ["dep:captcha_crate", "dep:rand"]
+# 验证码 Redis 存储(基于 redis 阻塞客户端)。
+captcha-redis = ["captcha", "dep:redis"]
 # Everything above, minus the exotic bits.
 full = [
     "sm",
+    "captcha",
     "chrono",
     "json",
     "rand",
@@ -93,6 +98,8 @@ getrandom = { version = "0.3", optional = true }
 rsa = { version = "0.9", optional = true }
 p256 = { version = "0.13", features = ["ecdh"], optional = true }
 libsm = { version = "0.6", optional = true }
+captcha_crate = { version = "1.0", package = "captcha", optional = true }
+redis = { version = "1.7", optional = true }
 jsonwebtoken = { version = "9", optional = true }
 
 # Crate-wide lint policy: no unsafe code, period.

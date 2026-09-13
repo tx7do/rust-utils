@@ -66,6 +66,7 @@ rust-utils = "0.1"
 [`crypto`]: src/crypto.rs
 [`jwt`]: src/jwt.rs
 [`bank_card`]: src/bank_card.rs
+[`captcha`]: src/captcha.rs
 
 ## 示例
 
@@ -179,6 +180,21 @@ let hash = algo.encrypt("s3cret!").unwrap();       // 标准 PHC 格式
 assert!(algo.verify("s3cret!", &hash).unwrap());
 ```
 
+### 验证码服务
+
+```rust
+use rust_utils::captcha::{Captcha, DriverKind};
+
+let cap = Captcha::with_config(DriverKind::Digit.into());
+let (id, b64, answer) = cap.generate().unwrap();
+// b64 带 "data:image/png;base64," 前缀,可直接给前端 <img>
+assert!(b64.starts_with("data:image/png;base64,"));
+assert!(cap.verify(&id, &answer).unwrap()); // 一次性校验
+```
+
+Redis 存储启用 `captcha-redis` feature 后,把 `Captcha::with_store(MemoryStore::new(), cfg)`
+换成 `RedisStore::new("redis://127.0.0.1/")?` 即可,服务层 API 完全一致。
+
 ### 缓存式批量加载
 
 ```rust
@@ -206,7 +222,8 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 |---|---|
 | `trans`(指针助手) | Rust 的 `Option<T>` 天然覆盖 |
 | `copierutil` / `mapper` / `structutil` / `fieldmaskutil` | 基于 Go 反射,在 Rust 中应改用 serde/prost 方案 |
-| `captcha` / `distlock` / `translator` / `geoip` | 依赖 Redis、外部 HTTP 服务或大体积数据文件,建议单独封装 |
+| `captcha` 的滑块/点选/旋转驱动 | 依赖 go-captcha 的图片素材管线;文本四类(数字/字母/算术/中文)已随 `captcha` feature 内置,Redis 存储见 `captcha-redis` |
+| `distlock` / `translator` / `geoip` | 依赖 Redis/etcd、外部 HTTP 服务或大体积数据文件,建议单独封装 |
 | `code_generator` | Go `text/template` 生态专属 |
 | `crypto` 的 SM2 部分 | SM3/SM4 已随 `sm` feature 内置(libsm);SM2 需要时可直接用 `libsm` 的 `sm2` 模块 |
 

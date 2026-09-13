@@ -30,6 +30,7 @@
 //! | [`password`]     | password        | `password`       |
 //! | [`crypto`]       | crypto          | `crypto`         |
 //! | [`sm`]           | crypto(SM 部分) | `sm`            |
+//! | [`captcha`]      | captcha         | `captcha`(Redis 落地用 `captcha-redis`) |
 //! | [`jwt`]          | jwtutil         | `jwt`            |
 
 #![allow(clippy::module_inception)]
@@ -51,6 +52,8 @@ pub mod stringutil;
 
 #[cfg(feature = "bank-card")]
 pub mod bank_card;
+#[cfg(feature = "captcha")]
+pub mod captcha;
 #[cfg(feature = "crypto")]
 pub mod crypto;
 #[cfg(feature = "chrono")]
