@@ -41,6 +41,7 @@ rust-utils = "0.1"
 | [`crypto`] | crypto | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充 |
 | [`jwt`] | jwtutil | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
 | [`bank_card`] | bank_card | `bank-card` | Luhn 校验 + BIN 查询(内嵌 2013 条记录) |
+| [`captcha`] | captcha | `captcha` | 图形验证码:数字/字母/算术/中文四类文本驱动 + 滑块/点选/旋转,自绘渲染,输出 JSON 与上游同构,存储层可插拔(`captcha-redis` 提供 Redis 落地) |
 
 [`byteutil`]: src/byteutil.rs
 [`stringcase`]: src/stringcase.rs
@@ -182,12 +183,17 @@ assert!(algo.verify("s3cret!", &hash).unwrap());
 
 ### 验证码服务
 
-```rust
-use rust_utils::captcha::{Captcha, DriverKind};
+七种驱动(数字/字母/算术/中文四类文本 + 滑块/点选/旋转)与 Go 版
+一一对应,配置面、输出 JSON 结构、验证容差对齐;渲染为程序自绘
+(字形资产说明见 `assets/captcha/README.md`)。
 
-let cap = Captcha::with_config(DriverKind::Digit.into());
+```rust
+use rust_utils::captcha::{Captcha, Config, DriverKind};
+
+let cap = Captcha::with_config(Config::with_driver(DriverKind::Digit));
 let (id, b64, answer) = cap.generate().unwrap();
-// b64 带 "data:image/png;base64," 前缀,可直接给前端 <img>
+// 文本驱动返回 PNG 数据 URI;滑块/点选/旋转驱动返回
+// 与上游同构的 JSON(内嵌 JPEG 主图 / PNG 缩略图)
 assert!(b64.starts_with("data:image/png;base64,"));
 assert!(cap.verify(&id, &answer).unwrap()); // 一次性校验
 ```
@@ -222,7 +228,6 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 |---|---|
 | `trans`(指针助手) | Rust 的 `Option<T>` 天然覆盖 |
 | `copierutil` / `mapper` / `structutil` / `fieldmaskutil` | 基于 Go 反射,在 Rust 中应改用 serde/prost 方案 |
-| `captcha` 的滑块/点选/旋转驱动 | 依赖 go-captcha 的图片素材管线;文本四类(数字/字母/算术/中文)已随 `captcha` feature 内置,Redis 存储见 `captcha-redis` |
 | `distlock` / `translator` / `geoip` | 依赖 Redis/etcd、外部 HTTP 服务或大体积数据文件,建议单独封装 |
 | `code_generator` | Go `text/template` 生态专属 |
 | `crypto` 的 SM2 部分 | SM3/SM4 已随 `sm` feature 内置(libsm);SM2 需要时可直接用 `libsm` 的 `sm2` 模块 |
@@ -236,11 +241,24 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 - `id::protected_id` / `new_xid` / `new_sonyflake_id` 中机器标识来源由 Go 版的内网 IP 改为进程内随机/进程 ID(std 无对应 API);
 - `crypto::EcdsaCipher::public_key_bytes` 由 Go 版的非标准 ASN.1 结构体改为标准 SEC1 非压缩编码。
 
+`captcha` 的固有差异(上游因素材缺失不可用的部分,本库以程序生成素材
+实现同构管线):
+
+- 滑块/点选的背景为 wrapper 同款渐变公式,点选字形为内嵌 GNU Unifont
+  位图子集、干扰图元逐式移植自上游,旋转驱动的圆盘为径向图案替身
+  (字形素材及其许可见 `assets/captcha/README.md`);数字驱动内置的
+  11×18 点阵与 dchest/base64Captcha 逐字节一致(Apache-2.0);
+- 上游 `rotate` builder 不读 wrapper 的 `RotateConfig`(恒用上游默认
+  常量 220×220、缩略 {140,150,160,170}、角度 [30,330]),Rust 版
+  保持同一行为,该配置字段惰性;
+- 上游点选验证把期望答案序列化为 JSON 对象、而其自身按数组解析,
+  恒为失败;Rust 版将同数据存为数组,使逐点 ±10px 的原验证语义可用。
+
 ## 开发
 
 ```bash
 cargo test              # 核心模块测试(零依赖)
-cargo test --all-features  # 全部模块测试(120 单测 + 19 文档测试)
+cargo test --all-features  # 全部模块测试(219 单测 + 25 文档测试)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```

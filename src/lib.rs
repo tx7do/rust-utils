@@ -52,6 +52,67 @@ pub mod stringutil;
 
 #[cfg(feature = "bank-card")]
 pub mod bank_card;
+
+// 标准 base64(带填充),供 crypto/captcha 模块共用。
+pub(crate) mod base64util {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    pub fn encode(data: &[u8]) -> String {
+        let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+        for chunk in data.chunks(3) {
+            let b = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
+            let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+            out.push(ALPHABET[(n >> 18 & 0x3F) as usize] as char);
+            out.push(ALPHABET[(n >> 12 & 0x3F) as usize] as char);
+            out.push(if chunk.len() > 1 {
+                ALPHABET[(n >> 6 & 0x3F) as usize] as char
+            } else {
+                '='
+            });
+            out.push(if chunk.len() > 2 {
+                ALPHABET[(n & 0x3F) as usize] as char
+            } else {
+                '='
+            });
+        }
+        out
+    }
+
+    pub fn decode(s: &str) -> Result<Vec<u8>, String> {
+        let mut vals = Vec::with_capacity(s.len());
+        for c in s.bytes() {
+            match c {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' => {
+                    vals.push(ALPHABET.iter().position(|a| *a == c).unwrap() as u32)
+                }
+                b'=' | b'\n' | b'\r' => {}
+                _ => return Err(format!("invalid base64 character: {}", c as char)),
+            }
+        }
+        let mut out = Vec::with_capacity(vals.len() * 3 / 4);
+        for chunk in vals.chunks(4) {
+            let n = match chunk.len() {
+                4 => (chunk[0] << 18) | (chunk[1] << 12) | (chunk[2] << 6) | chunk[3],
+                3 => (chunk[0] << 18) | (chunk[1] << 12) | (chunk[2] << 6),
+                2 => (chunk[0] << 18) | (chunk[1] << 12),
+                _ => return Err("invalid base64 length".to_string()),
+            };
+            out.push((n >> 16 & 0xFF) as u8);
+            if chunk.len() >= 3 {
+                out.push((n >> 8 & 0xFF) as u8);
+            }
+            if chunk.len() == 4 {
+                out.push((n & 0xFF) as u8);
+            }
+        }
+        Ok(out)
+    }
+}
+
 #[cfg(feature = "captcha")]
 pub mod captcha;
 #[cfg(feature = "crypto")]
