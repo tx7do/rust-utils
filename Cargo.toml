@@ -17,6 +17,8 @@ default = []
 chrono = ["dep:chrono"]
 # JSON-flavored query parsing and JSON field rewriting.
 json = ["dep:serde_json"]
+# Field masks over serde_json::Value (nested mask tree, filter/prune/overwrite/validate).
+fieldmask = ["dep:serde_json"]
 # Random toolkit: Randomizer, weighted choice, alias table, dice, jitter...
 rand = ["dep:rand"]
 # UUID helpers (v4 / v7 / short).
@@ -54,18 +56,22 @@ glob = ["dep:glob"]
 # Bank card BIN lookup + Luhn validation.
 bank-card = []
 
-# 国密 SM3 哈希与 SM4 分组密码(基于 libsm)。
-sm = ["dep:libsm"]
+# 国密 SM2/SM3/SM4(基于 libsm;SM2 含 C1C3C2/ASN.1 加解密与签名验签)。
+# 依赖 crypto 提供的 PKCS#7 填充与 Cipher trait。
+sm = ["crypto", "dep:libsm", "dep:num-bigint"]
 # 图形验证码服务:文本四类(数字/字母/算术/中文)+ 滑块/点选/
 # 旋转,自绘渲染,输出与上游一致的 JSON 结构;存储层默认内存实现。
 captcha = ["dep:image", "dep:rand", "dep:serde", "dep:serde_json"]
 # 验证码 Redis 存储(基于 redis 阻塞客户端)。
 captcha-redis = ["captcha", "dep:redis"]
+# TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置。
+tls = ["dep:rustls", "dep:rustls-pemfile", "dep:rustls-native-certs"]
 # Everything above, minus the exotic bits.
 full = [
     "sm",
     "captcha",
     "chrono",
+    "fieldmask",
     "json",
     "rand",
     "uuid",
@@ -76,6 +82,7 @@ full = [
     "name-generator",
     "glob",
     "bank-card",
+    "tls",
 ]
 
 [dependencies]
@@ -100,6 +107,10 @@ getrandom = { version = "0.3", optional = true }
 rsa = { version = "0.9", optional = true }
 p256 = { version = "0.13", features = ["ecdh"], optional = true }
 libsm = { version = "0.6", optional = true }
+num-bigint = { version = "0.4", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+rustls-pemfile = { version = "2", optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
 redis = { version = "1.7", optional = true }
 jsonwebtoken = { version = "9", optional = true }
 

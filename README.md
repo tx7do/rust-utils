@@ -42,6 +42,9 @@ rust-utils = "0.1"
 | [`jwt`] | jwtutil | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
 | [`bank_card`] | bank_card | `bank-card` | Luhn 校验 + BIN 查询(内嵌 2013 条记录) |
 | [`captcha`] | captcha | `captcha` | 图形验证码:数字/字母/算术/中文四类文本驱动 + 滑块/点选/旋转,自绘渲染,输出 JSON 与上游同构,存储层可插拔(`captcha-redis` 提供 Redis 落地) |
+| [`fieldmask`] | fieldmaskutil | `fieldmask` | 字段掩码:嵌套掩码树构建 + filter/prune/overwrite/validate/路径归一化(语义移植到 `serde_json::Value` 上) |
+| [`tls`] | tls | `tls` | TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
+| [`sm`] | crypto(SM 部分) | `sm` | 国密 SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/SM4-CBC |
 
 [`byteutil`]: src/byteutil.rs
 [`stringcase`]: src/stringcase.rs
@@ -68,6 +71,8 @@ rust-utils = "0.1"
 [`jwt`]: src/jwt.rs
 [`bank_card`]: src/bank_card.rs
 [`captcha`]: src/captcha.rs
+[`fieldmask`]: src/fieldmask.rs
+[`tls`]: src/tls.rs
 
 ## 示例
 
@@ -227,10 +232,9 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 | Go 包 | 原因 |
 |---|---|
 | `trans`(指针助手) | Rust 的 `Option<T>` 天然覆盖 |
-| `copierutil` / `mapper` / `structutil` / `fieldmaskutil` | 基于 Go 反射,在 Rust 中应改用 serde/prost 方案 |
+| `copierutil` / `mapper` / `structutil` | 基于 Go 反射,在 Rust 中应改用 serde/prost 方案 |
 | `distlock` / `translator` / `geoip` | 依赖 Redis/etcd、外部 HTTP 服务或大体积数据文件,建议单独封装 |
 | `code_generator` | Go `text/template` 生态专属 |
-| `crypto` 的 SM2 部分 | SM3/SM4 已随 `sm` feature 内置(libsm);SM2 需要时可直接用 `libsm` 的 `sm2` 模块 |
 
 行为修正(相对 Go 版的 bug):
 
@@ -239,7 +243,8 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 - `cryptocurrency` 的 XMR 正则多了一个前导 `/`(导致永远匹配不上)、TRC 正则未加锚点,均已修正;
 - `aggregator` 的并行执行器重试语义在 Rust 中要求任务可重复调用(`Fn`);
 - `id::protected_id` / `new_xid` / `new_sonyflake_id` 中机器标识来源由 Go 版的内网 IP 改为进程内随机/进程 ID(std 无对应 API);
-- `crypto::EcdsaCipher::public_key_bytes` 由 Go 版的非标准 ASN.1 结构体改为标准 SEC1 非压缩编码。
+- `crypto::EcdsaCipher::public_key_bytes` 由 Go 版的非标准 ASN.1 结构体改为标准 SEC1 非压缩编码;
+- 上游 gmsm 的 `CipherUnmarshal` 对 X/Y 不做 32 字节前导补零(概率性产生短 C1 导致解密错位),Rust 版补齐。
 
 `captcha` 的固有差异(上游因素材缺失不可用的部分,本库以程序生成素材
 实现同构管线):
@@ -254,11 +259,24 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 - 上游点选验证把期望答案序列化为 JSON 对象、而其自身按数组解析,
   恒为失败;Rust 版将同数据存为数组,使逐点 ±10px 的原验证语义可用。
 
+`tls` 与 `fieldmask` 的固有差异:
+
+- `tls` 返回 rustls 的 `ServerConfig`/`ClientConfig` 而非 Go 的
+  `*tls.Config`;`insecure_skip_verify` 参数保留但为空操作(上游
+  把它设在服务端配置上,该字段本就只对客户端验证生效);系统根
+  信任由 `rustls-native-certs` 加载;
+- `fieldmask` 把上游基于 proto 反射的掩码语义移植到
+  `serde_json::Value` 上:JSON 对象同时对应 proto 的普通字段与
+  map 字段,统一采用上游普通字段分支的保守语义(上游 map 分支
+  对掩码内标量更激进,见模块文档);`Validate` 以模板 JSON 对象
+ 充当消息描述符;`fieldmaskpb.FieldMask` 包装与字段号→路径
+  转换为 proto 专属,未移植。
+
 ## 开发
 
 ```bash
 cargo test              # 核心模块测试(零依赖)
-cargo test --all-features  # 全部模块测试(219 单测 + 25 文档测试)
+cargo test --all-features  # 全部模块测试(244 单测 + 28 文档测试,其中 1 例标记 ignore 不执行)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```

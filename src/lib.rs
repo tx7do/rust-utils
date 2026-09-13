@@ -119,6 +119,8 @@ pub mod captcha;
 pub mod crypto;
 #[cfg(feature = "chrono")]
 pub mod dateutil;
+#[cfg(feature = "fieldmask")]
+pub mod fieldmask;
 #[cfg(feature = "jwt")]
 pub mod jwt;
 #[cfg(feature = "name-generator")]
@@ -131,3 +133,5 @@ pub mod slug;
 pub mod sm;
 #[cfg(feature = "chrono")]
 pub mod timeutil;
+#[cfg(feature = "tls")]
+pub mod tls;
