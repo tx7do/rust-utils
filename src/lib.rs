@@ -32,6 +32,7 @@
 //! | [`sm`]           | crypto(SM 部分) | `sm`            |
 //! | [`captcha`]      | captcha         | `captcha`(Redis 落地用 `captcha-redis`) |
 //! | [`geoip`]        | geoip           | `geoip`           |
+//! | [`translator`]   | translator      | `translator`      | 翻译器四后端:百度(MD5 签名)/阿里(RPC 签名)/谷歌(v1 裸端点、v2/v3 REST 等价)/火山(HMAC-SHA256 派生链);请求构造与签名可离线验证 |
 //! | [`jwt`]          | jwtutil         | `jwt`            |
 
 #![allow(clippy::module_inception)]
@@ -138,3 +139,5 @@ pub mod sm;
 pub mod timeutil;
 #[cfg(feature = "tls")]
 pub mod tls;
+#[cfg(feature = "translator")]
+pub mod translator;

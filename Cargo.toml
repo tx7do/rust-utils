@@ -68,6 +68,9 @@ captcha-redis = ["captcha", "dep:redis"]
 tls = ["dep:rustls", "dep:rustls-pemfile", "dep:rustls-native-certs"]
 # IP 归属地查询:qqwry(GB18030)、ip2region xdb v2、MaxMind 读取器。
 geoip = ["dep:maxminddb", "dep:encoding_rs", "dep:serde"]
+# 翻译器:百度/阿里/谷歌/火山四后端(阻塞 HTTP,ureq;
+# 时间戳与 nonce 复用 chrono/uuid,签名复用 md-5/sha1/hmac/sha2)。
+translator = ["dep:ureq", "dep:md-5", "dep:sha1", "dep:hmac", "dep:sha2", "dep:serde", "dep:serde_json", "dep:chrono", "dep:uuid", "dep:rand"]
 # Everything above, minus the exotic bits.
 full = [
     "sm",
@@ -86,6 +89,7 @@ full = [
     "bank-card",
     "tls",
     "geoip",
+    "translator",
 ]
 
 [dependencies]
@@ -118,6 +122,9 @@ redis = { version = "1.7", optional = true }
 jsonwebtoken = { version = "9", optional = true }
 maxminddb = { version = "0.24", optional = true }
 encoding_rs = { version = "0.8", optional = true }
+ureq = { version = "2", optional = true }
+md-5 = { version = "0.11", optional = true }
+sha1 = { version = "0.10", optional = true }
 
 # Crate-wide lint policy: no unsafe code, period.
 [lints.rust]

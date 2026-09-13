@@ -45,6 +45,7 @@ rust-utils = "0.1"
 | [`fieldmask`] | fieldmaskutil | `fieldmask` | 字段掩码:嵌套掩码树构建 + filter/prune/overwrite/validate/路径归一化(语义移植到 `serde_json::Value` 上) |
 | [`tls`] | tls | `tls` | TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
 | [`geoip`] | geoip | `geoip` | IP 归属地查询三后端:qqwry(GB18030、字段重定向链、省/市切分)、ip2region xdb v2(向量索引+段索引二分、查询器池)、MaxMind mmdb 读取器;数据由调用方加载 |
+| [`translator`] | translator | `translator` | 翻译器四后端:百度(MD5 签名)/阿里(RPC 签名)/谷歌(v1 裸端点、v2/v3 REST 等价)/火山(HMAC-SHA256 派生链);请求构造与签名可离线验证 |
 | [`sm`] | crypto(SM 部分) | `sm` | 国密 SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/SM4-CBC |
 
 [`byteutil`]: src/byteutil.rs
@@ -75,6 +76,7 @@ rust-utils = "0.1"
 [`fieldmask`]: src/fieldmask.rs
 [`tls`]: src/tls.rs
 [`geoip`]: src/geoip.rs
+[`translator`]: src/translator.rs
 
 ## 示例
 
@@ -235,7 +237,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 |---|---|
 | `trans`(指针助手) | Rust 的 `Option<T>` 天然覆盖 |
 | `copierutil` / `mapper` / `structutil` | 基于 Go 反射,在 Rust 中应改用 serde/prost 方案 |
-| `distlock` / `translator` | 依赖 Redis/etcd 或外部 HTTP 服务,建议单独封装 |
+| `distlock` | 依赖 Redis/etcd,建议单独封装 |
 | `code_generator` | Go `text/template` 生态专属 |
 
 行为修正(相对 Go 版的 bug):
@@ -282,6 +284,25 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
   `IP2String`/`IPAddOne`/`IPSubOne` 等 go-utils 未调用的
    xdb 工具函数。
 
+`translator` 的固有差异:
+
+- 四后端均为单次请求:上游各官方 SDK 的重试/退避与内部错误对象
+  未移植,错误一律为字符串(`google` v2/v3 的错误文案为客户端库
+  行为的近似);上游 `google` 的 `language.Parse` BCP47 校验未
+  移植,语言标签原样透传;其 `encodeURI` 实为
+  `url.QueryEscape`(注释与实现不符),按实现语义移植;
+- `google` v2/v3 为上游官方客户端库的 REST 线上形态的等价实现
+  (v2 丢弃源语言参数、响应键名按公开 API 文档;v3 上游从不
+  设置 parent,空父路径下由服务端报错);
+- `alibaba` 的 `SignatureNonce` 上游为杂凑值的 32 位十六进制,
+  此处取 UUID v4 的 32 位十六进制(唯一性等价);上游的请求调试
+  打印(含凭据与签名头,`volc` 同)未移植;`volc` 的 `Host` 头由
+  HTTP 客户端按 URL 自动设置(上游显式设置,值相同);
+- 各响应解析中的越界访问(上游切片索引 panic)一律返回错误;
+  请求构造与签名按上游算法逐式复刻,并附金标测试(`alibaba` 为
+  SDK 自带测试向量、`volc` 为独立预计算的签名链输出、`baidu`
+  为独立预计算的 MD5)。
+
 `tls` 与 `fieldmask` 的固有差异:
 
 - `tls` 返回 rustls 的 `ServerConfig`/`ClientConfig` 而非 Go 的
@@ -299,7 +320,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test              # 核心模块测试(零依赖)
-cargo test --all-features  # 全部模块测试(268 单测 + 28 文档测试,其中 1 例标记 ignore 不执行)
+cargo test --all-features  # 全部模块测试(288 单测 + 28 文档测试,其中 1 例标记 ignore 不执行)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```
