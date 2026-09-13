@@ -44,6 +44,8 @@ rust-utils = "0.1"
 
 [`byteutil`]: src/byteutil.rs
 [`stringcase`]: src/stringcase.rs
+[`stringutil`]: src/stringutil.rs
+[`sm`]: src/sm.rs
 [`sliceutil`]: src/sliceutil.rs
 [`maputil`]: src/maputil.rs
 [`mathutil`]: src/mathutil.rs
@@ -177,6 +179,25 @@ let hash = algo.encrypt("s3cret!").unwrap();       // 标准 PHC 格式
 assert!(algo.verify("s3cret!", &hash).unwrap());
 ```
 
+### 缓存式批量加载
+
+```rust
+use rust_utils::aggregator::Loader;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+let calls = std::sync::Arc::new(AtomicUsize::new(0));
+let calls2 = calls.clone();
+let loader = Loader::new(move |keys: &[u32]| {
+    calls2.fetch_add(1, Ordering::Relaxed);
+    keys.iter().map(|k| (*k, k * 10)).collect()
+});
+
+let got = loader.load_many(&[1, 2, 3]);
+assert_eq!(got[&2].as_ref(), &20);
+loader.load_many(&[2, 3]); // 全部命中缓存,不再取数
+assert_eq!(calls.load(Ordering::Relaxed), 1);
+```
+
 ## 与 Go 版的差异
 
 未移植的 Go 包及原因:
@@ -187,14 +208,16 @@ assert!(algo.verify("s3cret!", &hash).unwrap());
 | `copierutil` / `mapper` / `structutil` / `fieldmaskutil` | 基于 Go 反射,在 Rust 中应改用 serde/prost 方案 |
 | `captcha` / `distlock` / `translator` / `geoip` | 依赖 Redis、外部 HTTP 服务或大体积数据文件,建议单独封装 |
 | `code_generator` | Go `text/template` 生态专属 |
-| `crypto` 的 RSA/ECDSA/SM2/SM3/SM4 部分 | 可接 RustCrypto 的 `rsa`/`p256` 等crate,暂未内置 |
+| `crypto` 的 SM2 部分 | SM3/SM4 已随 `sm` feature 内置(libsm);SM2 需要时可直接用 `libsm` 的 `sm2` 模块 |
 
 行为修正(相对 Go 版的 bug):
 
 - `sliceutil` 的 `FindLastIndex`/`FindLastIndexOf` 在 Go 里永远检查不到下标 0,已修正;
 - `ddl_parser` 的 `--` 行注释在 Go 里只会删掉最后一行(正则未开多行模式),已改为标准的"删到行尾";
 - `cryptocurrency` 的 XMR 正则多了一个前导 `/`(导致永远匹配不上)、TRC 正则未加锚点,均已修正;
-- `aggregator` 的并行执行器重试语义在 Rust 中要求任务可重复调用(`Fn`)。
+- `aggregator` 的并行执行器重试语义在 Rust 中要求任务可重复调用(`Fn`);
+- `id::protected_id` / `new_xid` / `new_sonyflake_id` 中机器标识来源由 Go 版的内网 IP 改为进程内随机/进程 ID(std 无对应 API);
+- `crypto::EcdsaCipher::public_key_bytes` 由 Go 版的非标准 ASN.1 结构体改为标准 SEC1 非压缩编码。
 
 ## 开发
 

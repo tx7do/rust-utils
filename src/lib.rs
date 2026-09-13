@@ -9,6 +9,7 @@
 //! |------------------|-----------------|------------------|
 //! | [`byteutil`]     | byteutil        | 默认             |
 //! | [`stringcase`]   | stringcase      | 默认             |
+//! | [`stringutil`]   | stringutil      | 默认             |
 //! | [`sliceutil`]    | sliceutil       | 默认             |
 //! | [`maputil`]      | maputils        | 默认             |
 //! | [`mathutil`]     | math            | 默认             |
@@ -28,6 +29,7 @@
 //! | [`slug`]         | slug            | `slug`           |
 //! | [`password`]     | password        | `password`       |
 //! | [`crypto`]       | crypto          | `crypto`         |
+//! | [`sm`]           | crypto(SM 部分) | `sm`            |
 //! | [`jwt`]          | jwtutil         | `jwt`            |
 
 #![allow(clippy::module_inception)]
@@ -45,6 +47,7 @@ pub mod pagination;
 pub mod query_parser;
 pub mod sliceutil;
 pub mod stringcase;
+pub mod stringutil;
 
 #[cfg(feature = "bank-card")]
 pub mod bank_card;
@@ -60,5 +63,7 @@ pub mod name_generator;
 pub mod random;
 #[cfg(feature = "slug")]
 pub mod slug;
+#[cfg(feature = "sm")]
+pub mod sm;
 #[cfg(feature = "chrono")]
 pub mod timeutil;

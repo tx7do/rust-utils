@@ -23,10 +23,28 @@ rand = ["dep:rand"]
 uuid = ["dep:uuid"]
 # URL slug generation with unicode transliteration.
 slug = ["dep:slug"]
-# Password hashing strategies: PBKDF2 / bcrypt / argon2 / HMAC / SHA-256 / SHA-512.
-password = ["dep:pbkdf2", "dep:bcrypt", "dep:argon2", "dep:hmac", "dep:sha2", "dep:getrandom"]
-# Cipher primitives: AES-CBC / AES-GCM / HMAC / SHA-2, with PKCS#7 padding.
-crypto = ["dep:aes", "dep:cbc", "dep:aes-gcm", "dep:hmac", "dep:sha2", "dep:getrandom"]
+# Password hashing strategies: PBKDF2 / bcrypt / argon2 / HMAC / SHA-2 / RSA / ECDSA / ECDH.
+password = [
+    "dep:pbkdf2",
+    "dep:bcrypt",
+    "dep:argon2",
+    "dep:hmac",
+    "dep:sha2",
+    "dep:getrandom",
+    "dep:rsa",
+    "dep:p256",
+]
+# Cipher primitives: AES-CBC / AES-GCM / RSA-OAEP / ECDSA+ECDH P-256 / HMAC / SHA-2.
+crypto = [
+    "dep:aes",
+    "dep:cbc",
+    "dep:aes-gcm",
+    "dep:hmac",
+    "dep:sha2",
+    "dep:getrandom",
+    "dep:rsa",
+    "dep:p256",
+]
 # JWT generate / parse / verify / refresh, built on jsonwebtoken.
 jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json", "dep:getrandom"]
 # Random name / nickname generator (embedded Chinese/English/Japanese dictionaries).
@@ -36,8 +54,11 @@ glob = ["dep:glob"]
 # Bank card BIN lookup + Luhn validation.
 bank-card = []
 
+# 国密 SM3 哈希与 SM4 分组密码(基于 libsm)。
+sm = ["dep:libsm"]
 # Everything above, minus the exotic bits.
 full = [
+    "sm",
     "chrono",
     "json",
     "rand",
@@ -69,6 +90,9 @@ aes = { version = "0.8", optional = true }
 cbc = { version = "0.1", features = ["std"], optional = true }
 aes-gcm = { version = "0.10", optional = true }
 getrandom = { version = "0.3", optional = true }
+rsa = { version = "0.9", optional = true }
+p256 = { version = "0.13", features = ["ecdh"], optional = true }
+libsm = { version = "0.6", optional = true }
 jsonwebtoken = { version = "9", optional = true }
 
 # Crate-wide lint policy: no unsafe code, period.

@@ -265,6 +265,262 @@ pub fn sha512_sum(data: &[u8]) -> [u8; 64] {
     hasher.finalize().into()
 }
 
+// ---------------------------------------------------------------------------
+// base64(标准字母表,带填充)—— RSA/ECDSA 输出格式需要
+// ---------------------------------------------------------------------------
+
+const B64_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// 标准带填充 base64 编码。
+pub fn to_base64(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(B64_ALPHABET[(n >> 18 & 0x3F) as usize] as char);
+        out.push(B64_ALPHABET[(n >> 12 & 0x3F) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            B64_ALPHABET[(n >> 6 & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            B64_ALPHABET[(n & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// 标准带填充 base64 解码。
+pub fn from_base64(s: &str) -> Result<Vec<u8>, String> {
+    let mut vals = Vec::with_capacity(s.len());
+    for c in s.bytes() {
+        match c {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' => {
+                vals.push(B64_ALPHABET.iter().position(|a| *a == c).unwrap() as u32)
+            }
+            b'=' | b'\n' | b'\r' => {}
+            _ => return Err(format!("invalid base64 character: {}", c as char)),
+        }
+    }
+    let mut out = Vec::with_capacity(vals.len() * 3 / 4);
+    for chunk in vals.chunks(4) {
+        let n = match chunk.len() {
+            4 => (chunk[0] << 18) | (chunk[1] << 12) | (chunk[2] << 6) | chunk[3],
+            3 => (chunk[0] << 18) | (chunk[1] << 12) | (chunk[2] << 6),
+            2 => (chunk[0] << 18) | (chunk[1] << 12),
+            _ => return Err("invalid base64 length".to_string()),
+        };
+        out.push((n >> 16 & 0xFF) as u8);
+        if chunk.len() >= 3 {
+            out.push((n >> 8 & 0xFF) as u8);
+        }
+        if chunk.len() == 4 {
+            out.push((n & 0xFF) as u8);
+        }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// RSA(RSA-OAEP-SHA256,PEM 导出)
+// ---------------------------------------------------------------------------
+
+/// RSA 密钥对:公钥加密 / 私钥解密(RSA-OAEP-SHA256 填充)。
+pub struct RsaCipher {
+    private: rsa::RsaPrivateKey,
+}
+
+impl RsaCipher {
+    /// 生成新的 RSA 密钥对(如 `bits = 2048`;密钥生成可能需要数百毫秒)。
+    pub fn new(bits: usize) -> Result<Self, String> {
+        let private = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, bits)
+            .map_err(|e| format!("rsa keygen failed: {e}"))?;
+        Ok(RsaCipher { private })
+    }
+
+    /// 公钥加密(RSA-OAEP-SHA256)。
+    pub fn encrypt(&self, plain: &[u8]) -> Result<Vec<u8>, String> {
+        let pub_key = rsa::RsaPublicKey::from(&self.private);
+        pub_key
+            .encrypt(
+                &mut rsa::rand_core::OsRng,
+                rsa::Oaep::new::<Sha256>(),
+                plain,
+            )
+            .map_err(|e| format!("rsa encrypt failed: {e}"))
+    }
+
+    /// 私钥解密(RSA-OAEP-SHA256)。
+    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>, String> {
+        self.private
+            .decrypt(rsa::Oaep::new::<Sha256>(), data)
+            .map_err(|e| format!("rsa decrypt failed: {e}"))
+    }
+
+    /// 导出私钥 PKCS#1 PEM(`RSA PRIVATE KEY`,与 Go 版一致)。
+    pub fn export_private_key_pem(&self) -> Result<String, String> {
+        use rsa::pkcs1::EncodeRsaPrivateKey as _;
+        self.private
+            .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
+            .map(|p| p.to_string())
+            .map_err(|e| format!("export private key failed: {e}"))
+    }
+
+    /// 导出公钥 SPKI PEM。字节内容与 Go 版一致;
+    /// PEM 标签改写为 `RSA PUBLIC KEY` 以对齐 Go 版输出。
+    pub fn export_public_key_pem(&self) -> Result<String, String> {
+        use rsa::pkcs8::EncodePublicKey as _;
+        let pub_key = rsa::RsaPublicKey::from(&self.private);
+        pub_key
+            .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+            .map(|p| {
+                p.replace("BEGIN PUBLIC KEY", "BEGIN RSA PUBLIC KEY")
+                    .replace("END PUBLIC KEY", "END RSA PUBLIC KEY")
+            })
+            .map_err(|e| format!("export public key failed: {e}"))
+    }
+
+    /// 算法名。
+    pub fn name(&self) -> &'static str {
+        "RSA"
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ECDSA P-256(签名/验签,输出格式与 Go 版兼容:`base64(r)$base64(s)`)
+// ---------------------------------------------------------------------------
+
+/// ECDSA P-256 数字签名。
+pub struct EcdsaCipher {
+    signing: p256::ecdsa::SigningKey,
+}
+
+impl Default for EcdsaCipher {
+    fn default() -> Self {
+        Self::new().expect("p256 keygen")
+    }
+}
+
+impl EcdsaCipher {
+    /// 生成新的 P-256 密钥对。
+    pub fn new() -> Result<Self, String> {
+        let signing = p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        Ok(EcdsaCipher { signing })
+    }
+
+    /// 签名,输出 `base64(r)$base64(s)`(r/s 固定 32 字节;
+    /// 兼容 Go 版的去零变长格式,反之亦然)。
+    pub fn sign(&self, data: &[u8]) -> String {
+        use p256::ecdsa::signature::Signer;
+        let sig: p256::ecdsa::Signature = self.signing.sign(data);
+        let bytes = sig.to_bytes();
+        format!("{}${}", to_base64(&bytes[..32]), to_base64(&bytes[32..]))
+    }
+
+    /// 验签;接受本库固定 32 字节格式与 Go 版去零变长格式。
+    pub fn verify(&self, data: &[u8], signature: &str) -> Result<bool, String> {
+        use p256::ecdsa::signature::Verifier;
+        let parts: Vec<&str> = signature.split('$').collect();
+        if parts.len() != 2 {
+            return Err("invalid signature format".to_string());
+        }
+        let r = pad32(&from_base64(parts[0])?)?;
+        let s = pad32(&from_base64(parts[1])?)?;
+        let mut sig = [0u8; 64];
+        sig[..32].copy_from_slice(&r);
+        sig[32..].copy_from_slice(&s);
+        let sig = p256::ecdsa::Signature::from_slice(&sig)
+            .map_err(|e| format!("invalid signature: {e}"))?;
+        let verifying = p256::ecdsa::VerifyingKey::from(&self.signing);
+        Ok(verifying.verify(data, &sig).is_ok())
+    }
+
+    /// 公钥 SEC1 非压缩编码(65 字节,`04 || X || Y`)。
+    /// 注:Go 版此处输出非标准的 ASN.1 结构体编码,这里改为标准 SEC1。
+    pub fn public_key_bytes(&self) -> Vec<u8> {
+        self.signing
+            .verifying_key()
+            .to_encoded_point(false)
+            .as_bytes()
+            .to_vec()
+    }
+
+    /// 算法名。
+    pub fn name(&self) -> &'static str {
+        "ECDSA"
+    }
+}
+
+fn pad32(bytes: &[u8]) -> Result<[u8; 32], String> {
+    if bytes.len() > 32 {
+        return Err("signature component too long".to_string());
+    }
+    let mut out = [0u8; 32];
+    out[32 - bytes.len()..].copy_from_slice(bytes);
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// ECDH P-256(密钥协商)
+// ---------------------------------------------------------------------------
+
+/// ECDH P-256 密钥协商:双方交换公钥后各自推导出相同的共享密钥。
+pub struct EcdhCipher {
+    secret: p256::SecretKey,
+}
+
+impl Default for EcdhCipher {
+    fn default() -> Self {
+        Self::new().expect("p256 keygen")
+    }
+}
+
+impl EcdhCipher {
+    /// 生成新的 P-256 密钥对。
+    pub fn new() -> Result<Self, String> {
+        let secret = p256::SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        Ok(EcdhCipher { secret })
+    }
+
+    /// 本方公钥 SEC1 非压缩编码(65 字节,与 Go 版 `PublicKeyBytes()` 兼容)。
+    pub fn public_key_bytes(&self) -> Vec<u8> {
+        use p256::elliptic_curve::sec1::ToEncodedPoint as _;
+        self.secret
+            .public_key()
+            .to_encoded_point(false)
+            .as_bytes()
+            .to_vec()
+    }
+
+    /// 用对端公钥推导共享密钥(32 字节,即共享点的 X 坐标;
+    /// 注意 Go 版返回去前导零的变长字节,这里固定 32 字节)。
+    pub fn derive_shared_secret(&self, peer_pub_bytes: &[u8]) -> Result<Vec<u8>, String> {
+        use p256::elliptic_curve::sec1::FromEncodedPoint as _;
+        let point = p256::EncodedPoint::from_bytes(peer_pub_bytes)
+            .map_err(|e| format!("ecdh public key: {e}"))?;
+        let peer = p256::PublicKey::from_encoded_point(&point)
+            .into_option()
+            .ok_or("ecdh public key: invalid point")?;
+        let shared = p256::elliptic_curve::ecdh::diffie_hellman(
+            self.secret.to_nonzero_scalar(),
+            peer.as_affine(),
+        );
+        Ok(shared.raw_secret_bytes().to_vec())
+    }
+
+    /// 算法名。
+    pub fn name(&self) -> &'static str {
+        "ECDH"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,5 +597,55 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
         assert_eq!(sha512_sum(b"abc").len(), 64);
+    }
+    #[test]
+    fn test_base64() {
+        assert_eq!(to_base64(b"hello"), "aGVsbG8=");
+        assert_eq!(from_base64("aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(to_base64(b"ab"), "YWI=");
+        assert_eq!(from_base64("YWI=").unwrap(), b"ab");
+        assert_eq!(to_base64(b"a"), "YQ==");
+        assert_eq!(from_base64("YQ==").unwrap(), b"a");
+        assert_eq!(to_base64(b""), "");
+        assert_eq!(from_base64("").unwrap(), b"");
+        assert!(from_base64("a!c=").is_err());
+    }
+
+    #[test]
+    fn test_rsa_roundtrip() {
+        let cipher = RsaCipher::new(2048).unwrap();
+        let plain = b"rsa secret payload";
+        let sealed = cipher.encrypt(plain).unwrap();
+        assert_ne!(sealed, plain.to_vec());
+        assert_eq!(cipher.decrypt(&sealed).unwrap(), plain.to_vec());
+        assert_eq!(cipher.name(), "RSA");
+
+        let priv_pem = cipher.export_private_key_pem().unwrap();
+        let pub_pem = cipher.export_public_key_pem().unwrap();
+        assert!(priv_pem.contains("BEGIN RSA PRIVATE KEY"));
+        assert!(pub_pem.contains("BEGIN RSA PUBLIC KEY"));
+    }
+
+    #[test]
+    fn test_ecdsa_sign_verify() {
+        let cipher = EcdsaCipher::new().unwrap();
+        let sig = cipher.sign(b"signed message");
+        assert!(sig.contains('$'));
+        assert!(cipher.verify(b"signed message", &sig).unwrap());
+        assert!(!cipher.verify(b"tampered message", &sig).unwrap());
+        assert!(cipher.verify(b"x", "bad-format").is_err());
+        assert_eq!(cipher.public_key_bytes().len(), 65);
+        assert_eq!(cipher.public_key_bytes()[0], 0x04);
+    }
+
+    #[test]
+    fn test_ecdh_shared_secret() {
+        let a = EcdhCipher::new().unwrap();
+        let b = EcdhCipher::new().unwrap();
+        let secret_a = a.derive_shared_secret(&b.public_key_bytes()).unwrap();
+        let secret_b = b.derive_shared_secret(&a.public_key_bytes()).unwrap();
+        assert_eq!(secret_a, secret_b);
+        assert_eq!(secret_a.len(), 32);
+        assert!(a.derive_shared_secret(&[0u8; 10]).is_err());
     }
 }

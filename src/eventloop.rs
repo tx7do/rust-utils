@@ -271,6 +271,7 @@ struct Inner<T> {
     frame_driven: bool,
     processor: Mutex<Option<Box<dyn EventProcessor<T>>>>,
     metrics: Box<dyn Metrics>,
+    logger: std::sync::RwLock<Arc<dyn EventLogger>>,
     queues: Mutex<Queues<T>>,
     event_cv: Condvar,    // 事件循环线程等待新事件/停止
     space_cv: Condvar,    // 阻塞提交等待队列空间
@@ -311,6 +312,17 @@ impl<T: Send + 'static> EventLoop<T> {
         frame_driven: bool,
         metrics: Option<Box<dyn Metrics>>,
     ) -> Self {
+        EventLoop::with_logger(buffer_size, processor, frame_driven, metrics, None)
+    }
+
+    /// 同 [`EventLoop::new`],但可注入自定义 [`EventLogger`]。
+    pub fn with_logger(
+        buffer_size: usize,
+        processor: impl EventProcessor<T>,
+        frame_driven: bool,
+        metrics: Option<Box<dyn Metrics>>,
+        logger: Option<Arc<dyn EventLogger>>,
+    ) -> Self {
         let buffer_size = if buffer_size == 0 {
             DEFAULT_BUFFER_SIZE
         } else {
@@ -322,6 +334,7 @@ impl<T: Send + 'static> EventLoop<T> {
                 frame_driven,
                 processor: Mutex::new(Some(Box::new(processor))),
                 metrics: metrics.unwrap_or_else(|| Box::new(NoopMetrics)),
+                logger: std::sync::RwLock::new(logger.unwrap_or_else(|| Arc::new(NoopLogger))),
                 queues: Mutex::new(Queues {
                     high: VecDeque::with_capacity(buffer_size),
                     medium: VecDeque::with_capacity(buffer_size),
@@ -421,6 +434,11 @@ impl<T: Send + 'static> EventLoop<T> {
             low: q.low.len(),
             callback: q.callback.len(),
         }
+    }
+
+    /// 运行时注入日志实现(默认 [`NoopLogger`];Go 版 `SetLogger` 同款)。
+    pub fn set_logger(&self, logger: Arc<dyn EventLogger>) {
+        *self.inner.logger.write().unwrap() = logger;
     }
 
     /// 切换回调投递模式;`inline = true` 表示在事件循环内同步投递,
@@ -619,6 +637,7 @@ fn process_frame<T: Send + 'static>(inner: &Arc<Inner<T>>, processor: &mut dyn E
             inner.space_cv.notify_all();
             handle_event(inner, &mut *processor, event);
             if frame_start.elapsed() >= frame_budget {
+                inner.log_warn("frame budget exceeded, defer rest events to next frame");
                 // 帧预算超支,放弃本帧剩余事件
                 return;
             }
@@ -705,7 +724,8 @@ fn deliver_result<T: Send + 'static>(
                 }
                 let now = Instant::now();
                 if now >= deadline {
-                    return; // 超时丢弃
+                    inner2.log_warn("enqueue callback timeout, discard result");
+                    return;
                 }
                 let (guard, _) = inner2.callback_cv.wait_timeout(q, deadline - now).unwrap();
                 q = guard;
@@ -732,8 +752,8 @@ fn callback_dispatcher<T: Send + 'static>(inner: Arc<Inner<T>>) {
         let timeout = inner.config.lock().unwrap().cb_timeout;
         if timeout.is_zero() {
             let _ = cb.send(result);
-        } else {
-            let _ = cb.send_timeout(result, timeout);
+        } else if let Err(CbSendTimeoutError::Timeout(_)) = cb.send_timeout(result, timeout) {
+            inner.log_warn("callback deliver timeout, discard result");
         }
     }
 }
@@ -744,6 +764,38 @@ impl<T> Drop for EventLoop<T> {
         if Arc::strong_count(&self.inner) == 1 {
             stop_inner(&self.inner);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Logger(注入式日志接口,对应 Go 版 logger.go)
+// ---------------------------------------------------------------------------
+
+/// 注入式日志接口;默认 [`NoopLogger`] 静默。
+pub trait EventLogger: Send + Sync {
+    fn warn(&self, msg: &str);
+}
+
+/// 空日志(默认)。
+pub struct NoopLogger;
+
+impl EventLogger for NoopLogger {
+    fn warn(&self, _msg: &str) {}
+}
+
+/// 标准错误日志。
+pub struct StdLogger;
+
+impl EventLogger for StdLogger {
+    fn warn(&self, msg: &str) {
+        eprintln!("[eventloop] warn: {msg}");
+    }
+}
+
+impl<T> Inner<T> {
+    fn log_warn(&self, msg: &str) {
+        let logger = self.logger.read().unwrap();
+        logger.warn(msg);
     }
 }
 
@@ -1206,5 +1258,46 @@ mod tests {
             (ql.high, ql.medium, ql.low) == (0, 0, 0)
         });
         loop_.stop();
+    }
+
+    #[test]
+    fn test_logger_receives_warnings() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Counter(Arc<AtomicUsize>);
+        impl EventLogger for Counter {
+            fn warn(&self, _msg: &str) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        // 帧预算压到 1ns:任何事件处理都会超支并触发 warn 日志
+        let counter = Arc::new(AtomicUsize::new(0));
+        let loop_ = EventLoop::with_logger(
+            16,
+            Collector(Arc::new(Mutex::new(Vec::new()))),
+            true,
+            None,
+            Some(Arc::new(Counter(counter.clone()))),
+        );
+        loop_.set_frame_parameters(
+            Some(Duration::from_millis(10)),
+            Some(Duration::from_nanos(1)),
+            Some(Duration::ZERO),
+        );
+        loop_.start();
+        loop_
+            .submit(Event::new("budget", None).with_priority(Priority::High))
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while counter.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        loop_.stop();
+        assert!(
+            counter.load(Ordering::Relaxed) >= 1,
+            "logger should have received warnings"
+        );
     }
 }

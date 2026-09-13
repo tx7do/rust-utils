@@ -39,6 +39,10 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
+fn now_unix() -> u32 {
+    now_millis().div_euclid(1000) as u32
+}
+
 /// 雪花 ID 节点:41 位毫秒时间戳 + 10 位工作节点 + 12 位序列号,
 /// 趋势递增的 64 位 ID。
 ///
@@ -446,6 +450,207 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 // ---------------------------------------------------------------------------
+// ShortUUID / ObjectID / XID(feature = "uuid" 的部分依赖 uuid crate)
+// ---------------------------------------------------------------------------
+
+/// shortuuid 默认 base57 字母表(去除易混淆的 0/O/1/I/l)。
+const SHORTUUID_ALPHABET: &[u8] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/// 生成 ShortUUID(22 位 base57 编码的 UUID v4)。
+/// 字母表与 Go 版 `shortuuid.New()` 一致。
+#[cfg(feature = "uuid")]
+pub fn new_short_uuid() -> String {
+    let bytes = uuid::Uuid::new_v4().into_bytes();
+    encode_base57(&bytes)
+}
+
+/// 大整数(大端字节)base57 编码,输出定长 22 位(不足前补字母表首字符)。
+#[cfg(feature = "uuid")]
+fn encode_base57(bytes: &[u8; 16]) -> String {
+    let base = SHORTUUID_ALPHABET.len() as u128;
+    let mut value = u128::from_be_bytes(*bytes);
+    let mut out = Vec::with_capacity(22);
+    for _ in 0..22 {
+        out.push(SHORTUUID_ALPHABET[(value % base) as usize] as char);
+        value /= base;
+    }
+    out.into_iter().rev().collect()
+}
+
+static ID_COUNTER: AtomicU32 = AtomicU32::new(0);
+static MACHINE_3B: OnceLock<[u8; 3]> = OnceLock::new();
+
+fn machine_3b() -> [u8; 3] {
+    *MACHINE_3B.get_or_init(|| {
+        let mut buf = [0u8; 3];
+        let _ = pseudo_random(&mut buf);
+        buf
+    })
+}
+
+fn next_counter24() -> u32 {
+    ID_COUNTER.fetch_add(1, Ordering::Relaxed) & 0xFF_FFFF
+}
+
+/// 生成 MongoDB 风格 ObjectID(24 位十六进制:
+/// 4 字节秒级时间戳 + 5 字节随机 + 3 字节递增计数)。
+pub fn new_mongo_object_id() -> String {
+    let ts = now_unix();
+    let mut rand5 = [0u8; 5];
+    let _ = pseudo_random(&mut rand5);
+    let counter = next_counter24().to_be_bytes();
+    let mut raw = [0u8; 12];
+    raw[0..4].copy_from_slice(&ts.to_be_bytes());
+    raw[4..9].copy_from_slice(&rand5);
+    raw[9..12].copy_from_slice(&counter[1..4]);
+    let hex: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    hex
+}
+
+/// 生成 XID(20 字符 base32hex 小写:
+/// 4 字节秒级时间戳 + 3 字节机器 + 2 字节进程 + 3 字节计数,
+/// 与 rs/xid 的编码格式一致)。
+pub fn new_xid() -> String {
+    const ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuv";
+    let ts = now_unix();
+    let machine = machine_3b();
+    let pid = std::process::id() as u16;
+    let counter = next_counter24().to_be_bytes();
+    let mut raw = [0u8; 12];
+    raw[0..4].copy_from_slice(&ts.to_be_bytes());
+    raw[4..7].copy_from_slice(&machine);
+    raw[7..9].copy_from_slice(&pid.to_be_bytes());
+    raw[9..12].copy_from_slice([counter[1], counter[2], counter[3]].as_slice());
+
+    // 标准 base32(MSB 优先)编码 12 字节 → 恰好 20 个 5 位组
+    let mut padded = [0u8; 13];
+    padded[..12].copy_from_slice(&raw);
+    let mut out = String::with_capacity(20);
+    for i in 0..20 {
+        let bit = i * 5;
+        let idx =
+            (((padded[bit / 8] as u16) << 8) | padded[bit / 8 + 1] as u16) >> (11 - bit % 8) & 0x1F;
+        out.push(ALPHABET[idx as usize] as char);
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Sonyflake(39 位 10ms 时间戳 + 8 位序列 + 16 位机器)
+// ---------------------------------------------------------------------------
+
+/// Sonyflake 起始纪元(2014-09-01T00:00:00Z,对齐 sony/sonyflake)。
+pub const SONYFLAKE_EPOCH_MS: i64 = 1_409_529_600_000;
+
+const SONYFLAKE_SEQ_BITS: u32 = 8;
+const SONYFLAKE_MACHINE_BITS: u32 = 16;
+const SONYFLAKE_TIME_SHIFT: u32 = SONYFLAKE_SEQ_BITS + SONYFLAKE_MACHINE_BITS;
+
+/// Sonyflake 节点:时间粒度 10ms,单机每 10ms 最多 256 个 ID。
+pub struct SonyflakeNode {
+    machine_id: u16,
+    state: Mutex<(i64, u8)>, // (已使用的 10ms 时间片, 序列号)
+}
+
+impl SonyflakeNode {
+    /// 创建节点(机器 ID 取 0..=65535)。
+    pub fn new(machine_id: u16) -> Self {
+        SonyflakeNode {
+            machine_id,
+            state: Mutex::new((0, 0)),
+        }
+    }
+
+    /// 生成一个 ID;当前 10ms 片序列耗尽时自旋等待下一片。
+    pub fn generate(&self) -> u64 {
+        let mut st = self.state.lock().unwrap();
+        loop {
+            let now10 = (now_millis() - SONYFLAKE_EPOCH_MS).max(0) / 10;
+            if now10 > st.0 {
+                st.0 = now10;
+                st.1 = 0;
+                break ((now10 as u64) << SONYFLAKE_TIME_SHIFT) | (self.machine_id as u64);
+            }
+            if now10 == st.0 {
+                st.1 = st.1.wrapping_add(1);
+                if st.1 != 0 {
+                    break ((now10 as u64) << SONYFLAKE_TIME_SHIFT)
+                        | ((st.1 as u64) << SONYFLAKE_MACHINE_BITS)
+                        | (self.machine_id as u64);
+                }
+            }
+            std::hint::spin_loop();
+        }
+    }
+}
+
+static SONYFLAKE: OnceLock<SonyflakeNode> = OnceLock::new();
+
+/// 全局 Sonyflake(机器 ID 为进程内随机值;
+/// Go 版默认取内网 IP 低 16 位,std 无对应 API,故有此差异)。
+pub fn new_sonyflake_id() -> u64 {
+    let node = SONYFLAKE.get_or_init(|| {
+        let mut buf = [0u8; 2];
+        let _ = pseudo_random(&mut buf);
+        SonyflakeNode::new(u16::from_be_bytes(buf))
+    });
+    node.generate()
+}
+
+/// [`new_sonyflake_id`] 的无错误版本。
+pub fn generate_sonyflake_id() -> u64 {
+    new_sonyflake_id()
+}
+
+// ---------------------------------------------------------------------------
+// 机器码保护 ID(对应 machineid.ProtectedID)
+// ---------------------------------------------------------------------------
+
+/// RFC 2104 HMAC-SHA256(基于内置 SHA-256 实现)。
+fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut k = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        k[..32].copy_from_slice(&sha256(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Vec::with_capacity(BLOCK + msg.len());
+    inner.extend(k.iter().map(|b| b ^ 0x36));
+    inner.extend_from_slice(msg);
+    let inner_hash = sha256(&inner);
+
+    let mut outer = Vec::with_capacity(BLOCK + 32);
+    outer.extend(k.iter().map(|b| b ^ 0x5c));
+    outer.extend_from_slice(&inner_hash);
+    sha256(&outer)
+}
+
+/// 返回受应用密钥保护的机器码:
+/// `hex(hmac_sha256(key = 机器码, msg = app_id))`,
+/// 与 Go 版 `machineid.ProtectedID` 算法一致。
+pub fn protected_id(app_id: &str) -> Result<String, String> {
+    let id = raw_machine_id()?;
+    Ok(hex_lower(&hmac_sha256(id.as_bytes(), app_id.as_bytes())))
+}
+
+/// 进程内伪随机(种子来自时间 + 进程 ID),仅供 ID 组装用,非加密安全。
+fn pseudo_random(buf: &mut [u8]) -> Result<(), String> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64 ^ d.as_secs())
+        .unwrap_or(0x853c49e6748fea9b);
+    let mut seed = nanos ^ ((std::process::id() as u64) << 32);
+    for b in buf.iter_mut() {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        *b = (seed >> 24) as u8;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // UUID(feature = "uuid")
 // ---------------------------------------------------------------------------
 
@@ -642,5 +847,83 @@ mod tests {
         let v7a = new_guid_v7(false);
         let v7b = new_guid_v7(false);
         assert!(v7b >= v7a);
+    }
+    #[test]
+    fn test_short_uuid() {
+        let s = new_short_uuid();
+        assert_eq!(s.len(), 22);
+        assert!(s.chars().all(|c| SHORTUUID_ALPHABET.contains(&(c as u8))));
+        // 同一 UUID 的编码确定性
+        let again = new_short_uuid();
+        assert_ne!(s, again);
+    }
+
+    #[test]
+    fn test_mongo_object_id() {
+        let a = new_mongo_object_id();
+        let b = new_mongo_object_id();
+        assert_eq!(a.len(), 24);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+        // 时间戳部分单调
+        let ts_a = u32::from_str_radix(&a[..8], 16).unwrap();
+        let ts_b = u32::from_str_radix(&b[..8], 16).unwrap();
+        assert!(ts_b >= ts_a);
+    }
+
+    #[test]
+    fn test_xid() {
+        let a = new_xid();
+        let b = new_xid();
+        assert_eq!(a.len(), 20);
+        assert!(a
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        assert_ne!(a, b);
+        // 时间戳部分(base32 首字符含秒的高位)单调
+        assert!(b >= a);
+    }
+
+    #[test]
+    fn test_sonyflake() {
+        let node = SonyflakeNode::new(0x1234);
+        let a = node.generate();
+        let b = node.generate();
+        assert!(b > a);
+        assert_eq!((a) & 0xFFFF, 0x1234); // 机器位
+        let global = generate_sonyflake_id();
+        assert!(global > 0);
+    }
+
+    #[test]
+    fn test_protected_id() {
+        // 与标准 HMAC-SHA256 对齐:保护后的 ID 是 64 位十六进制
+        if let Ok(pid) = protected_id("my-app") {
+            assert_eq!(pid.len(), 64);
+            assert!(pid.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+        // 同 app_id 结果稳定(同机器)
+        let a = protected_id("app");
+        let b = protected_id("app");
+        assert_eq!(a.ok(), b.ok());
+    }
+
+    #[test]
+    fn test_hmac_sha256_vectors() {
+        // RFC 4231 HMAC-SHA256 测试向量
+        let out = hex_lower(&hmac_sha256(
+            b"key",
+            b"The quick brown fox jumps over the lazy dog",
+        ));
+        assert_eq!(
+            out,
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+        );
+        // 空消息
+        let empty = hex_lower(&hmac_sha256(b"key", b""));
+        assert_eq!(
+            empty,
+            "5d5d139563c95b5967b9bd9a8c9b233a9dedb45072794cd232dc1b74832607d0"
+        );
     }
 }

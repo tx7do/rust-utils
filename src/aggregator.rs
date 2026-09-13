@@ -370,6 +370,161 @@ fn backoff_wait(attempt: u32) {
     std::thread::sleep(delay / 2 + Duration::from_millis(jitter));
 }
 
+// ---------------------------------------------------------------------------
+// DataLoader 风格的缓存批量加载器(对应 Go 版 dataloader.go 的同步子集)
+// ---------------------------------------------------------------------------
+
+/// 批量取数函数:一次拿到所有未缓存键对应的资源(取不到的键不出现
+/// 在返回的映射里)。
+pub type BatchFetch<K, V> = Arc<dyn Fn(&[K]) -> HashMap<K, V> + Send + Sync>;
+
+/// 缓存式批量加载器:相同键只取一次,多个未命中键合并为一次批量取数
+/// (避免 N+1 查询)。
+///
+/// 这是 Go 版基于 graph-gophers/dataloader 的请求级自动批处理的同步
+/// 简化版:批处理由调用方触发(`load_many`),不做后台窗口合并。
+/// 取不到的键会记为"已查询缺失",在 [`clear`](Self::clear) 之前不再
+/// 触发取数(与 DataLoader 的错误缓存语义一致)。
+///
+/// ```
+/// use rust_utils::aggregator::Loader;
+/// use std::sync::atomic::{AtomicUsize, Ordering};
+///
+/// let calls = std::sync::Arc::new(AtomicUsize::new(0));
+/// let calls2 = calls.clone();
+/// let loader = Loader::new(move |keys: &[u32]| {
+///     calls2.fetch_add(1, Ordering::Relaxed);
+///     keys.iter().map(|k| (*k, k * 10)).collect()
+/// });
+///
+/// let got = loader.load_many(&[1, 2, 3]);
+/// assert_eq!(got[&2].as_ref(), &20);
+/// // 已缓存键不再触发取数
+/// loader.load_many(&[2, 3]);
+/// loader.load(1);
+/// assert_eq!(calls.load(Ordering::Relaxed), 1);
+/// ```
+pub struct Loader<K, V> {
+    cache: std::sync::Mutex<HashMap<K, Option<Arc<V>>>>,
+    fetch: BatchFetch<K, V>,
+}
+
+impl<K, V> Loader<K, V>
+where
+    K: Eq + std::hash::Hash + Clone + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    /// 创建加载器,`fetch` 为批量取数函数。
+    pub fn new(fetch: impl Fn(&[K]) -> HashMap<K, V> + Send + Sync + 'static) -> Self {
+        Loader {
+            cache: std::sync::Mutex::new(HashMap::new()),
+            fetch: Arc::new(fetch),
+        }
+    }
+
+    /// 批量加载:未命中(含未查询过)的键去重后一次性交给 fetch,
+    /// 结果写入缓存。返回命中的键值对。
+    pub fn load_many(&self, keys: &[K]) -> HashMap<K, Arc<V>> {
+        let mut cache = self.cache.lock().unwrap();
+        let mut seen = std::collections::HashSet::new();
+        let pending: Vec<K> = keys
+            .iter()
+            .filter(|k| !cache.contains_key(*k) && seen.insert((*k).clone()))
+            .cloned()
+            .collect();
+        if !pending.is_empty() {
+            let mut fetched = (self.fetch)(&pending);
+            for k in &pending {
+                let entry = fetched.remove(k).map(Arc::new);
+                cache.insert(k.clone(), entry);
+            }
+        }
+        keys.iter()
+            .filter_map(|k| {
+                cache
+                    .get(k)
+                    .and_then(|v| v.as_ref().map(|arc| (k.clone(), arc.clone())))
+            })
+            .collect()
+    }
+
+    /// 单键加载;未命中时触发一次单键批量取数,缺失返回 `None`。
+    pub fn load(&self, key: K) -> Option<Arc<V>> {
+        self.load_many(std::slice::from_ref(&key))
+            .get(&key)
+            .cloned()
+    }
+
+    /// 当前缓存条目数(含已查询缺失的键)。
+    pub fn cache_len(&self) -> usize {
+        self.cache.lock().unwrap().len()
+    }
+
+    /// 清空缓存(之后重新触发取数)。
+    pub fn clear(&self) {
+        self.cache.lock().unwrap().clear();
+    }
+}
+
+#[cfg(test)]
+mod loader_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    #[test]
+    fn test_loader_batches_and_caches() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let requested: Arc<Mutex<Vec<Vec<u32>>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let c2 = calls.clone();
+        let r2 = requested.clone();
+        let loader = Loader::new(move |keys: &[u32]| {
+            c2.fetch_add(1, Ordering::Relaxed);
+            r2.lock().unwrap().push(keys.to_vec());
+            keys.iter().map(|k| (*k, k * 10)).collect()
+        });
+
+        let got = loader.load_many(&[1, 2, 3]);
+        assert_eq!(got.len(), 3);
+        assert_eq!(got[&2].as_ref(), &20);
+
+        // 重复调用命中缓存,不触发取数
+        loader.load_many(&[2, 3, 3]);
+        let one = loader.load(1);
+        assert_eq!(one.as_deref(), Some(&10));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(loader.cache_len(), 3);
+
+        // 去重:同一批里的重复键只发一次
+        loader.clear();
+        let _ = loader.load_many(&[7, 7, 7]);
+        assert_eq!(requested.lock().unwrap().last().unwrap(), &vec![7]);
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn test_loader_missing_keys_not_refetched() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c2 = calls.clone();
+        let loader = Loader::new(move |keys: &[u32]| {
+            c2.fetch_add(1, Ordering::Relaxed);
+            keys.iter()
+                .filter(|k| **k % 2 == 0)
+                .map(|k| (*k, ()))
+                .collect()
+        });
+
+        assert!(loader.load(1).is_none()); // 奇数缺失
+        assert!(loader.load(2).is_some());
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        // 已查询缺失的键不再触发
+        assert!(loader.load(1).is_none());
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        assert_eq!(loader.cache_len(), 2);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
