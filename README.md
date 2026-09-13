@@ -44,6 +44,7 @@ rust-utils = "0.1"
 | [`captcha`] | captcha | `captcha` | 图形验证码:数字/字母/算术/中文四类文本驱动 + 滑块/点选/旋转,自绘渲染,输出 JSON 与上游同构,存储层可插拔(`captcha-redis` 提供 Redis 落地) |
 | [`fieldmask`] | fieldmaskutil | `fieldmask` | 字段掩码:嵌套掩码树构建 + filter/prune/overwrite/validate/路径归一化(语义移植到 `serde_json::Value` 上) |
 | [`tls`] | tls | `tls` | TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
+| [`geoip`] | geoip | `geoip` | IP 归属地查询三后端:qqwry(GB18030、字段重定向链、省/市切分)、ip2region xdb v2(向量索引+段索引二分、查询器池)、MaxMind mmdb 读取器;数据由调用方加载 |
 | [`sm`] | crypto(SM 部分) | `sm` | 国密 SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/SM4-CBC |
 
 [`byteutil`]: src/byteutil.rs
@@ -73,6 +74,7 @@ rust-utils = "0.1"
 [`captcha`]: src/captcha.rs
 [`fieldmask`]: src/fieldmask.rs
 [`tls`]: src/tls.rs
+[`geoip`]: src/geoip.rs
 
 ## 示例
 
@@ -233,7 +235,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 |---|---|
 | `trans`(指针助手) | Rust 的 `Option<T>` 天然覆盖 |
 | `copierutil` / `mapper` / `structutil` | 基于 Go 反射,在 Rust 中应改用 serde/prost 方案 |
-| `distlock` / `translator` / `geoip` | 依赖 Redis/etcd、外部 HTTP 服务或大体积数据文件,建议单独封装 |
+| `distlock` / `translator` | 依赖 Redis/etcd 或外部 HTTP 服务,建议单独封装 |
 | `code_generator` | Go `text/template` 生态专属 |
 
 行为修正(相对 Go 版的 bug):
@@ -245,6 +247,8 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 - `id::protected_id` / `new_xid` / `new_sonyflake_id` 中机器标识来源由 Go 版的内网 IP 改为进程内随机/进程 ID(std 无对应 API);
 - `crypto::EcdsaCipher::public_key_bytes` 由 Go 版的非标准 ASN.1 结构体改为标准 SEC1 非压缩编码;
 - 上游 gmsm 的 `CipherUnmarshal` 对 X/Y 不做 32 字节前导补零(概率性产生短 C1 导致解密错位),Rust 版补齐。
+- 上游 `qqwry` 的 `Query` 以 `len(area)`(引用了尚未赋值的变量,恒为 0)推进运营商字段位置,Rust 版按读出的国家串长度修正;
+- 上游 `qqwry` 的 `locateIP` 对单条目(startPos==endPos)与未按条目对齐的索引区间在未命中条目起始 IP 时死循环,Rust 版按未找到返回(命中条目起始 IP 的返回保持原行为)。
 
 `captcha` 的固有差异(上游因素材缺失不可用的部分,本库以程序生成素材
 实现同构管线):
@@ -258,6 +262,25 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
   保持同一行为,该配置字段惰性;
 - 上游点选验证把期望答案序列化为 JSON 对象、而其自身按数组解析,
   恒为失败;Rust 版将同数据存为数组,使逐点 ±10px 的原验证语义可用。
+
+`geoip` 的固有差异:
+
+- 三个后端的数据文件(qqwry.dat、ip2region xdb、GeoLite2 mmdb)
+  不再 `go:embed`,各构造函数改为接收字节序列,由调用方自行加载;
+- 越界读取由 Go 的切片 panic 改为返回错误/零偏移/空串,含 xdb
+  头与向量索引的长度校验(上游为固定切片 panic);
+- `qqwry` 的 `SpiltAddress` 正则以字面交替匹配等价实现(含 `.`
+  不匹配换行的语义);`ip2region` 的地域字节串按 UTF-8 有损转为
+  `String`(上游 `string()` 接受任意字节;真实 xdb 地域串为
+  UTF-8,仅畸形数据受影响),Go channel 查询器池改为
+  `Mutex`+`Condvar`;
+- `geolite` 查询失败由上游 `log.Fatal`(直接杀进程)改为返回
+  错误;
+- 未移植:各查询器与池的 `Close`/`CloseTimeout`(查询器不持有
+  需要关闭的资源,上游 `Searcher.Close` 本为空操作)、
+  `Header`/`Config` 的 `String()`、以及 `VersionFromIP`/
+  `IP2String`/`IPAddOne`/`IPSubOne` 等 go-utils 未调用的
+   xdb 工具函数。
 
 `tls` 与 `fieldmask` 的固有差异:
 
@@ -276,7 +299,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test              # 核心模块测试(零依赖)
-cargo test --all-features  # 全部模块测试(244 单测 + 28 文档测试,其中 1 例标记 ignore 不执行)
+cargo test --all-features  # 全部模块测试(268 单测 + 28 文档测试,其中 1 例标记 ignore 不执行)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```

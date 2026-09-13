@@ -31,6 +31,7 @@
 //! | [`crypto`]       | crypto          | `crypto`         |
 //! | [`sm`]           | crypto(SM 部分) | `sm`            |
 //! | [`captcha`]      | captcha         | `captcha`(Redis 落地用 `captcha-redis`) |
+//! | [`geoip`]        | geoip           | `geoip`           |
 //! | [`jwt`]          | jwtutil         | `jwt`            |
 
 #![allow(clippy::module_inception)]
@@ -121,6 +122,8 @@ pub mod crypto;
 pub mod dateutil;
 #[cfg(feature = "fieldmask")]
 pub mod fieldmask;
+#[cfg(feature = "geoip")]
+pub mod geoip;
 #[cfg(feature = "jwt")]
 pub mod jwt;
 #[cfg(feature = "name-generator")]

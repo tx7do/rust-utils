@@ -66,6 +66,8 @@ captcha = ["dep:image", "dep:rand", "dep:serde", "dep:serde_json"]
 captcha-redis = ["captcha", "dep:redis"]
 # TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置。
 tls = ["dep:rustls", "dep:rustls-pemfile", "dep:rustls-native-certs"]
+# IP 归属地查询:qqwry(GB18030)、ip2region xdb v2、MaxMind 读取器。
+geoip = ["dep:maxminddb", "dep:encoding_rs", "dep:serde"]
 # Everything above, minus the exotic bits.
 full = [
     "sm",
@@ -83,6 +85,7 @@ full = [
     "glob",
     "bank-card",
     "tls",
+    "geoip",
 ]
 
 [dependencies]
@@ -113,6 +116,8 @@ rustls-pemfile = { version = "2", optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
 redis = { version = "1.7", optional = true }
 jsonwebtoken = { version = "9", optional = true }
+maxminddb = { version = "0.24", optional = true }
+encoding_rs = { version = "0.8", optional = true }
 
 # Crate-wide lint policy: no unsafe code, period.
 [lints.rust]
