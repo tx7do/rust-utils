@@ -1,38 +1,34 @@
-//! 翻译器(对应 Go 版 `translator` 包,feature `translator`)。
+//! 翻译器,feature `translator`。
 //!
-//! 四个后端与 Go 版一一对应:
+//! 四个后端:
 //!
 //! - [`baidu`]:百度翻译开放平台(表单 POST,MD5 签名);
-//! - [`alibaba`]:阿里云机器翻译(官方 SDK 的 RPC 签名与表单
-//!   POST 线上形态逐式复刻);
-//! - [`google`]:谷歌翻译(v1 为上游的裸 HTTP 端点,v2/v3 为上游
-//!   官方客户端库的 REST 等价实现);
+//! - [`alibaba`]:阿里云机器翻译(按官方 API 的 RPC 签名算法
+//!   构造请求,签名随 URL 查询串提交,正文为表单 POST);
+//! - [`google`]:谷歌翻译(v1 为裸 HTTP 端点拼接调用,v2/v3 为
+//!   REST 调用);
 //! - [`volc`]:火山引擎翻译(HMAC-SHA256 四级密钥派生链签名 +
 //!   JSON POST;另有批量入口)。
 //!
-//! 各后端的差异细节见各自模块文档;与上游的整体差异:
+//! 各后端的细节见各自模块文档;整体行为要点:
 //!
-//! - 上游各官方 SDK 的重试/退避与内部错误对象未移植(单次请求,
-//!   错误一律为字符串);
-//! - `google` 上游的 `language.Parse` BCP47 校验未移植(语言标签
-//!   原样透传);其 `encodeURI` 实为 `url.QueryEscape`(注释与
-//!   实现不符),按实现语义移植;
-//! - 各响应解析中的越界访问(上游切片索引 panic)一律返回错误;
-//! - `alibaba` 的 `SignatureNonce` 上游为杂凑值的 32 位十六进制,
-//!   此处取 UUID v4 的 32 位十六进制,唯一性等价;
-//! - 上游的请求调试打印(含凭据与签名头)未移植;
-//! - 各上游 `Close`/`String` 等杂项中,仅 `volc` 的脱敏字符串
-//!   (`Display`)被移植;
-//! - 语言代码表见上游 `translator/README.md`。
+//! - 请求行为:四后端均为单次请求,不自动重试;错误一律为字符串;
+//! - 签名与编码:URL 编码对 ASCII 字母数字与 `-_.~` 直通,空格
+//!   作 `+`,其余按 `%XX` 大写十六进制;有序表单/查询串按键名
+//!   排序;语言标签原样透传,不做 BCP47 校验;
+//! - 响应解析:对越界/畸形数据一律返回错误,不 panic;
+//! - `alibaba` 的 `SignatureNonce` 取 UUID v4 的 32 位十六进制;
+//! - `volc` 提供 `Display` 实现,输出脱敏的调试字符串;
+//! - 各后端支持的语言代码表见对应云厂商的官方文档。
 
 pub mod alibaba;
 pub mod baidu;
 pub mod google;
 pub mod volc;
 
-/// 翻译器接口(上游 `translator.Translator`)。
+/// 翻译器接口。
 pub trait Translator {
-    /// 翻译(上游 `Translate`)。
+    /// 翻译。
     fn translate(
         &self,
         source: &str,
@@ -41,9 +37,8 @@ pub trait Translator {
     ) -> Result<String, String>;
 }
 
-/// URL 查询/表单成分编码(上游 `url.QueryEscape` 的字节语义:
-/// ASCII 字母数字与 `-_.~` 直通,空格作 `+`,其余 `%XX` 大写
-/// 十六进制)。
+/// URL 查询/表单成分编码(按字节处理:ASCII 字母数字与
+/// `-_.~` 直通,空格作 `+`,其余 `%XX` 大写十六进制)。
 pub(crate) fn query_escape(s: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut out = String::with_capacity(s.len());
@@ -63,8 +58,8 @@ pub(crate) fn query_escape(s: &str) -> String {
     out
 }
 
-/// 参数对的有序表单/查询串编码(上游 `url.Values.Encode`:按原键
-/// 排序,键与值均经 `query_escape`)。
+/// 参数对的有序表单/查询串编码(按键名排序,键与值均经
+/// `query_escape` 编码)。
 pub(crate) fn form_encode(pairs: &[(&str, &str)]) -> String {
     let mut pairs: Vec<_> = pairs.to_vec();
     pairs.sort();
@@ -80,7 +75,7 @@ pub(crate) fn form_encode(pairs: &[(&str, &str)]) -> String {
     out
 }
 
-/// 小写十六进制(上游 `hex.EncodeToString`)。
+/// 小写十六进制编码。
 pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

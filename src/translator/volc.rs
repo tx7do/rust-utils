@@ -1,14 +1,10 @@
-//! 火山引擎翻译后端(对应 Go 版 `translator/volc`,feature
-//! `translator`)。
+//! 火山引擎翻译后端,feature `translator`。
 //!
-//! 上游语义:JSON POST 至 `translate.volcengineapi.com`,附
+//! 请求行为:JSON POST 至 `translate.volcengineapi.com`,附
 //! `X-Date`(UTC 时间戳)、`X-Content-Sha256`(请求体 SHA-256
 //! 的 base64)、`Authorization`(规范请求经 HMAC-SHA256 四级
-//! 密钥派生链签名)。单条与批量两个入口,批量校验条数一致。
-//!
-//! 与上游的差异:上游的请求调试打印(含凭据与签名头)未移植;
-//! `Host` 头由 HTTP 客户端按 URL 自动设置(上游显式设置,值
-//! 相同);`VerifySignature` 调试辅助由签名测试覆盖。
+//! 密钥派生链签名);`Host` 头由 HTTP 客户端按 URL 自动设置。
+//! 单条与批量两个入口,批量校验条数一致。
 
 use crate::base64util;
 use crate::translator::hex_encode;
@@ -24,9 +20,8 @@ const VOLC_HOST: &str = "translate.volcengineapi.com";
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// 火山引擎翻译器(上游 `volc.Translator`:区域默认
-/// `cn-north-1`,上游 `WithRegion`/`WithHTTPClient` 语义;密钥
-/// 去除末尾换行)。
+/// 火山引擎翻译器(区域默认 `cn-north-1`,经
+/// `with_region`/`with_http_client` 设置;密钥去除末尾换行)。
 pub struct Translator {
     access_key: String,
     secret_key: String,
@@ -35,13 +30,13 @@ pub struct Translator {
 }
 
 impl Translator {
-    /// 创建(上游 `NewTranslator`:空密钥报错,密钥依序去除末尾
-    /// `\n` 与 `\r\n`;上游客户端 30 秒超时)。
+    /// 创建(空密钥报错,密钥依序去除末尾 `\n` 与 `\r\n`;
+    /// 客户端 30 秒超时)。
     pub fn new(access_key: &str, secret_key: &str) -> Result<Self, String> {
         if access_key.is_empty() || secret_key.is_empty() {
             return Err("accessKey和secretKey不能为空".to_string());
         }
-        // 上游:两处 TrimSuffix 依序执行(单次各至多去除一个后缀)
+        // 依序去除,单次各至多去除一个后缀
         let mut secret_key = secret_key.to_string();
         for suffix in ["\n", "\r\n"] {
             if let Some(stripped) = secret_key.strip_suffix(suffix) {
@@ -58,26 +53,26 @@ impl Translator {
         })
     }
 
-    /// 设置区域(上游 `WithRegion`)。
+    /// 设置区域。
     pub fn with_region(mut self, region: &str) -> Self {
         self.region = region.to_string();
         self
     }
 
-    /// 设置 HTTP 客户端(上游 `WithHTTPClient`)。
+    /// 设置 HTTP 客户端。
     pub fn with_http_client(mut self, client: ureq::Agent) -> Self {
         self.client = client;
         self
     }
 
-    /// HMAC-SHA256(上游 `hmacSHA256`)。
+    /// 计算 HMAC-SHA256。
     fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
         let mut mac = <HmacSha256 as Mac>::new_from_slice(key).expect("hmac key");
         mac.update(data);
         mac.finalize().into_bytes().into()
     }
 
-    /// 生成签名(上游 `generateSignature` 的逐式复刻)。
+    /// 生成签名(按官方 API 签名算法构造规范请求与派生链)。
     fn generate_signature(&self, body: &[u8], timestamp: &str, date: &str) -> String {
         let body_hash_b64 = {
             let hash: [u8; 32] = Sha256::digest(body).into();
@@ -107,9 +102,8 @@ impl Translator {
         hex_encode(&signature)
     }
 
-    /// 构建并签名请求(上游 `buildAndSignRequest`:URL 为常量,
-    /// 头含时间戳/体哈希/签权;时间为上游取当下 UTC,此处注入
-    /// 以便测试)。
+    /// 构建并签名请求(URL 为常量,头含时间戳/体哈希/签权;
+    /// 时间由调用方注入以便测试)。
     fn build_and_sign_request(
         &self,
         body: &[u8],
@@ -138,8 +132,7 @@ impl Translator {
         )
     }
 
-    /// 调用 API(上游 `callAPI`:请求体 JSON 序列化、签名请求、
-    /// POST、响应解析)。
+    /// 调用 API(请求体 JSON 序列化、签名请求、POST、响应解析)。
     fn call_api(&self, body: &str) -> Result<VolcTranslationResponse, String> {
         let (url, headers) = self.build_and_sign_request(body.as_bytes(), Utc::now());
         let mut request = self.client.post(&url);
@@ -161,8 +154,7 @@ impl Translator {
         Self::parse_response(&resp_body)
     }
 
-    /// 响应解析(上游 `callAPI` 的响应处理:元数据错误报错,
-    /// 否则取翻译响应)。
+    /// 响应解析(元数据含错误时报错,否则取翻译响应)。
     fn parse_response(body: &str) -> Result<VolcTranslationResponse, String> {
         let resp: VolcResponse =
             serde_json::from_str(body).map_err(|e| format!("解析响应失败: {e}, 响应: {body}"))?;
@@ -174,7 +166,7 @@ impl Translator {
 }
 
 impl crate::translator::Translator for Translator {
-    /// 单文本翻译(上游 `Translate`)。
+    /// 单文本翻译。
     fn translate(
         &self,
         source: &str,
@@ -201,7 +193,7 @@ impl crate::translator::Translator for Translator {
 }
 
 impl Translator {
-    /// 批量翻译(上游 `TranslateBatch`)。
+    /// 批量翻译。
     pub fn translate_batch(
         &self,
         sources: &[&str],
@@ -237,7 +229,7 @@ impl Translator {
     }
 }
 
-// 上游 String():脱敏的调试字符串
+// 脱敏的调试字符串
 impl fmt::Display for Translator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -250,7 +242,7 @@ impl fmt::Display for Translator {
     }
 }
 
-/// 上游 `translateTextRequest` 的 JSON 形态。
+/// 翻译请求体的 JSON 形态。
 #[derive(Serialize)]
 struct TranslateTextRequest<'a> {
     #[serde(rename = "SourceLanguage")]
@@ -263,22 +255,21 @@ struct TranslateTextRequest<'a> {
     scene: &'a str,
 }
 
-/// 上游 `translateTextResponse` 的 JSON 形态(`TranslationList`
-/// 缺失时为空表,对应上游零值)。
+/// 翻译响应的 JSON 形态(`TranslationList` 缺失时为空表)。
 #[derive(Deserialize, Default)]
 struct VolcTranslationResponse {
     #[serde(default, rename = "TranslationList")]
     translation_list: Vec<VolcTranslationItem>,
 }
 
-/// 上游 `translateTextResponse` 内层条目(`Text` 缺失时为空串)。
+/// 翻译响应内层条目(`Text` 缺失时为空串)。
 #[derive(Deserialize)]
 struct VolcTranslationItem {
     #[serde(default, rename = "Text")]
     text: String,
 }
 
-/// 上游 `volcResponse` 的 JSON 形态。
+/// 完整响应的 JSON 形态(元数据 + 翻译响应)。
 #[derive(Deserialize, Default)]
 struct VolcResponse {
     #[serde(default, rename = "ResponseMetadata")]
@@ -287,14 +278,14 @@ struct VolcResponse {
     translation_response: VolcTranslationResponse,
 }
 
-/// 上游 `ResponseMetadata`(仅错误字段被读取)。
+/// 响应元数据(仅错误字段被读取)。
 #[derive(Deserialize, Default)]
 struct VolcResponseMetadata {
     #[serde(default, rename = "Error")]
     error: Option<VolcResponseError>,
 }
 
-/// 上游错误对象。
+/// 元数据中的错误对象。
 #[derive(Deserialize)]
 struct VolcResponseError {
     #[serde(default, rename = "Code")]
@@ -319,7 +310,7 @@ mod tests {
             "accessKey和secretKey不能为空"
         );
         let t = Translator::new("test_access_key", "test_secret_key\n").unwrap();
-        assert_eq!(t.region, "cn-north-1"); // 上游默认区域
+        assert_eq!(t.region, "cn-north-1"); // 默认区域
         assert_eq!(t.secret_key, "test_secret_key"); // 末尾换行去除
         let t = t.with_region("cn-shanghai");
         assert_eq!(t.region, "cn-shanghai");
@@ -328,7 +319,7 @@ mod tests {
     #[test]
     fn volc_build_and_sign_request() {
         let t = Translator::new("test_access_key", "test_secret_key").unwrap();
-        // 请求体经结构体序列化(上游 json.Marshal 的字段序)
+        // 请求体经结构体序列化
         let text_list = ["你好，世界！".to_string()];
         let body = serde_json::to_string(&TranslateTextRequest {
             source_language: "zh",
@@ -341,8 +332,7 @@ mod tests {
             body,
             r#"{"SourceLanguage":"zh","TargetLanguage":"en","TextList":["你好，世界！"],"Scene":"general"}"#
         );
-        // 固定时间下的签名链输出(基于 Go 源码字面转录的独立预计算;
-        // X-Content-Sha256 与上游测试日志一致)
+        // 固定时间下的签名链输出(独立预计算)
         let now = Utc.with_ymd_and_hms(2026, 3, 2, 12, 46, 26).unwrap();
         let (url, headers) = t.build_and_sign_request(body.as_bytes(), now);
         assert_eq!(
@@ -382,7 +372,7 @@ mod tests {
         );
         let err = Translator::parse_response("not json").err().unwrap();
         assert!(err.starts_with("解析响应失败"), "{err}");
-        // 翻译列表缺失 → 上游零值(空表)
+        // 翻译列表缺失 → 空表
         let resp = Translator::parse_response("{}").unwrap();
         assert!(resp.translation_list.is_empty());
     }

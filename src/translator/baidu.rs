@@ -1,8 +1,7 @@
-//! 百度翻译开放平台后端(对应 Go 版 `translator/baidu`,feature
-//! `translator`)。
+//! 百度翻译开放平台后端,feature `translator`。
 //!
-//! 上游语义:表单 POST(`q`/`from`/`to`/`appid`/`salt`/`sign`),
-//! `sign` 为 MD5(appid + q + salt + 密钥)的小写十六进制;响应
+//! 表单 POST(`q`/`from`/`to`/`appid`/`salt`/`sign`),`sign` 为
+//! MD5(appid + q + salt + 密钥)的小写十六进制;响应
 //! `trans_result[0].dst` 为译文,`error_code`/`error_msg` 为错误。
 
 use crate::translator::{form_encode, hex_encode};
@@ -12,7 +11,7 @@ use std::time::Duration;
 
 const BAIDU_ENDPOINT: &str = "https://fanyi-api.baidu.com/api/trans/vip/translate";
 
-/// 百度翻译器(上游 `baidu.Translator`:上游客户端 30 秒超时)。
+/// 百度翻译器(客户端 30 秒超时)。
 pub struct Translator {
     app_id: String,
     secret_key: String,
@@ -20,7 +19,7 @@ pub struct Translator {
 }
 
 impl Translator {
-    /// 创建(上游 `NewTranslator`)。
+    /// 创建。
     pub fn new(app_id: &str, secret_key: &str) -> Self {
         Self {
             app_id: app_id.to_string(),
@@ -31,15 +30,14 @@ impl Translator {
         }
     }
 
-    /// 签名(上游 `generateSign`)。
+    /// 签名。
     fn generate_sign(&self, query: &str, salt: i64) -> String {
         let str_ = format!("{}{}{}{}", self.app_id, query, salt, self.secret_key);
         let digest: [u8; 16] = Md5::digest(str_.as_bytes()).into();
         hex_encode(&digest)
     }
 
-    /// 构造请求(上游 `Translate` 的参数组装;`salt` 由上游随机
-    /// 生成,此处注入以便测试)。
+    /// 构造请求(参数组装与签名;`salt` 由调用方注入以便测试)。
     fn build_request(
         &self,
         source: &str,
@@ -60,7 +58,7 @@ impl Translator {
         (BAIDU_ENDPOINT.to_string(), form_encode(&params))
     }
 
-    /// 响应解析(上游 `Translate` 的响应处理)。
+    /// 响应解析。
     fn parse_response(body: &str) -> Result<String, String> {
         let resp: BaiduResponse = serde_json::from_str(body).map_err(|e| e.to_string())?;
         if !resp.error_code.is_empty() {
@@ -77,7 +75,7 @@ impl Translator {
 }
 
 impl crate::translator::Translator for Translator {
-    /// 翻译(上游 `Translate`)。
+    /// 翻译。
     fn translate(
         &self,
         source: &str,
@@ -107,7 +105,7 @@ impl crate::translator::Translator for Translator {
     }
 }
 
-/// 上游 `baiduResponse` 的 JSON 形态。
+/// 响应的 JSON 形态。
 #[derive(Deserialize)]
 struct BaiduResponse {
     #[serde(default)]
@@ -118,7 +116,7 @@ struct BaiduResponse {
     error_msg: String,
 }
 
-/// 上游 `baiduResponse` 内层条目。
+/// 响应内层条目。
 #[derive(Deserialize)]
 struct BaiduTransItem {
     #[serde(default)]
@@ -139,7 +137,7 @@ mod tests {
     #[test]
     fn baidu_generate_sign() {
         let t = Translator::new("20230101000001234", "test_secret_key");
-        // 独立预计算的 MD5 向量(上游测试同参)
+        // 独立预计算的 MD5 向量
         assert_eq!(
             t.generate_sign("apple", 1234567890),
             "79c8d3557d1e04376e00011acc0c1490"
@@ -155,7 +153,7 @@ mod tests {
         let t = Translator::new("20230101000001234", "test_secret_key");
         let (url, body) = t.build_request("apple", "en", "zh", 1234567890);
         assert_eq!(url, "https://fanyi-api.baidu.com/api/trans/vip/translate");
-        // 上游 url.Values.Encode 的排序与转义(含空格作 "+")
+        // 表单编码的排序与转义(含空格作 "+")
         assert_eq!(
             body,
             "appid=20230101000001234&from=en&q=apple&salt=1234567890&sign=79c8d3557d1e04376e00011acc0c1490&to=zh"

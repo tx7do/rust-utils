@@ -1,7 +1,7 @@
-//! ID 生成工具箱(移植自 go-utils/id):雪花 ID、订单号、机器码,
+//! ID 生成工具箱:雪花 ID、订单号、机器码,
 //! 以及(feature `uuid`)UUID v4/v7。
 //!
-//! 全部零依赖实现:snowflake 算法手写(对齐 bwmarrin/snowflake 的位布局),
+//! 全部零依赖实现:snowflake 算法手写,
 //! 机器码归一化所需的 SHA-256 为内置实现。
 //!
 //! ```
@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// snowflake 起始纪元(对齐 bwmarrin/snowflake,即 Twitter 纪元)。
+/// snowflake 起始纪元(即 Twitter 纪元)。
 pub const SNOWFLAKE_EPOCH_MS: i64 = 1288834974657;
 
 const WORKER_ID_BITS: i64 = 10;
@@ -124,13 +124,12 @@ pub fn new_snowflake_node(worker_id: i64) -> Result<Arc<SnowflakeNode>, String> 
     Ok(node)
 }
 
-/// 通过全局节点池生成雪花 ID(等价 Go 版 `NewSnowflakeID`)。
+/// 通过全局节点池生成雪花 ID。
 pub fn new_snowflake_id(worker_id: i64) -> Result<i64, String> {
     Ok(new_snowflake_node(worker_id)?.generate())
 }
 
-/// [`new_snowflake_id`] 的无错误版本,失败返回 0(等价 Go 版
-/// `GenerateSnowflakeID`)。
+/// [`new_snowflake_id`] 的无错误版本,失败返回 0。
 pub fn generate_snowflake_id(worker_id: i64) -> i64 {
     new_snowflake_id(worker_id).unwrap_or(0)
 }
@@ -142,7 +141,7 @@ pub fn generate_snowflake_id(worker_id: i64) -> i64 {
 static ORDER_INDEX: AtomicU32 = AtomicU32::new(0);
 static RAND_STATE: AtomicU64 = AtomicU64::new(0);
 
-/// 0..=1000 的循环自增索引(等价 Go 版实现,含同样的回绕行为)。
+/// 0..=1000 的循环自增索引。
 fn increase_order_index() -> u32 {
     let cur = ORDER_INDEX.fetch_add(1, Ordering::Relaxed);
     ORDER_INDEX
@@ -335,7 +334,7 @@ fn unify_machine_id_internal(
     if cleaned.len() == 32 {
         Ok(cleaned)
     } else {
-        // 降级:长度不符时用 SHA-256 前 32 位十六进制(与 Go 版一致)
+        // 降级:长度不符时用 SHA-256 前 32 位十六进制
         let hex = hex_lower(&sha256(raw.as_bytes()));
         Ok(hex[..32].to_string())
     }
@@ -458,7 +457,6 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
 const SHORTUUID_ALPHABET: &[u8] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 /// 生成 ShortUUID(22 位 base57 编码的 UUID v4)。
-/// 字母表与 Go 版 `shortuuid.New()` 一致。
 #[cfg(feature = "uuid")]
 pub fn new_short_uuid() -> String {
     let bytes = uuid::Uuid::new_v4().into_bytes();
@@ -509,8 +507,7 @@ pub fn new_mongo_object_id() -> String {
 }
 
 /// 生成 XID(20 字符 base32hex 小写:
-/// 4 字节秒级时间戳 + 3 字节机器 + 2 字节进程 + 3 字节计数,
-/// 与 rs/xid 的编码格式一致)。
+/// 4 字节秒级时间戳 + 3 字节机器 + 2 字节进程 + 3 字节计数)。
 pub fn new_xid() -> String {
     const ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuv";
     let ts = now_unix();
@@ -540,7 +537,7 @@ pub fn new_xid() -> String {
 // Sonyflake(39 位 10ms 时间戳 + 8 位序列 + 16 位机器)
 // ---------------------------------------------------------------------------
 
-/// Sonyflake 起始纪元(2014-09-01T00:00:00Z,对齐 sony/sonyflake)。
+/// Sonyflake 起始纪元(2014-09-01T00:00:00Z)。
 pub const SONYFLAKE_EPOCH_MS: i64 = 1_409_529_600_000;
 
 const SONYFLAKE_SEQ_BITS: u32 = 8;
@@ -587,8 +584,7 @@ impl SonyflakeNode {
 
 static SONYFLAKE: OnceLock<SonyflakeNode> = OnceLock::new();
 
-/// 全局 Sonyflake(机器 ID 为进程内随机值;
-/// Go 版默认取内网 IP 低 16 位,std 无对应 API,故有此差异)。
+/// 全局 Sonyflake(机器 ID 取进程内随机值)。
 pub fn new_sonyflake_id() -> u64 {
     let node = SONYFLAKE.get_or_init(|| {
         let mut buf = [0u8; 2];
@@ -604,7 +600,7 @@ pub fn generate_sonyflake_id() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// 机器码保护 ID(对应 machineid.ProtectedID)
+// 机器码保护 ID
 // ---------------------------------------------------------------------------
 
 /// RFC 2104 HMAC-SHA256(基于内置 SHA-256 实现)。
@@ -628,8 +624,7 @@ fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
 }
 
 /// 返回受应用密钥保护的机器码:
-/// `hex(hmac_sha256(key = 机器码, msg = app_id))`,
-/// 与 Go 版 `machineid.ProtectedID` 算法一致。
+/// `hex(hmac_sha256(key = 机器码, msg = app_id))`。
 pub fn protected_id(app_id: &str) -> Result<String, String> {
     let id = raw_machine_id()?;
     Ok(hex_lower(&hmac_sha256(id.as_bytes(), app_id.as_bytes())))
@@ -714,7 +709,7 @@ mod tests {
         let t = SystemTime::now();
         let id = generate_order_id_with_random("ORD", Some(t));
         assert!(id.starts_with("ORD"));
-        // 随机数 0..9999 不补零,位数 1..=4(与 Go 一致)
+        // 随机数 0..9999 不补零,位数 1..=4
         assert!(
             ("ORD".len() + 14 + 1..="ORD".len() + 14 + 4).contains(&id.len()),
             "unexpected len: {id}"

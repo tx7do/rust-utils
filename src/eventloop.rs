@@ -1,15 +1,15 @@
-//! 单线程优先级事件循环,支持"帧驱动"模式(游戏服务器风格),
-//! 移植自 go-utils/eventloop。
+//! 单线程优先级事件循环,支持"帧驱动"模式(游戏服务器风格)。
 //!
 //! 三个有界优先级队列(高/中/低),事件循环线程严格按优先级处理:
 //! 每次取事件前都重新检查高/中优先级,低优先级事件始终让位。
 //! 帧驱动模式下以固定帧率(默认 50ms/帧)唤醒,并遵守每帧时间预算。
 //!
-//! 与 Go 版的差异:
-//! - 事件载荷是泛型 `T`(Go 里是 `any`),回调通道为
-//!   [`std::sync::mpsc::SyncSender`];
-//! - 没有 per-event context,`SubmitBlocking` 用超时代替取消;
-//! - 日志接口未移植(丢弃回调时静默),统计接口([`Metrics`])保留。
+//! 实现说明:
+//! - 事件载荷为泛型 `T`,回调通道为内置的有界通道
+//!   ([`CbSender`]/[`CbReceiver`]);
+//! - 提交接口不带 per-event context,阻塞提交以超时作为放弃手段;
+//! - 丢弃回调时静默,警告可经 [`EventLogger`] 注入;统计接口为
+//!   [`Metrics`]。
 //!
 //! ```
 //! use rust_utils::eventloop::{new_request_event, Event, EventLoop, EventProcessor, EventResult};
@@ -397,7 +397,7 @@ impl<T: Send + 'static> EventLoop<T> {
             self.push_handle(handle);
         }
 
-        // 最多等 50ms 让循环就绪(Go 版同款超时)
+        // 最多等 50ms 让循环就绪
         let deadline = Instant::now() + Duration::from_millis(50);
         let mut started = self.inner.started.lock().unwrap();
         while !*started && Instant::now() < deadline {
@@ -415,7 +415,7 @@ impl<T: Send + 'static> EventLoop<T> {
     }
 
     /// 停止事件循环并等待线程退出;未在运行时为空操作。
-    /// 队列中未处理的事件被丢弃(与 Go 版一致)。
+    /// 队列中未处理的事件被丢弃。
     pub fn stop(&self) {
         stop_inner(&self.inner);
     }
@@ -436,7 +436,7 @@ impl<T: Send + 'static> EventLoop<T> {
         }
     }
 
-    /// 运行时注入日志实现(默认 [`NoopLogger`];Go 版 `SetLogger` 同款)。
+    /// 运行时注入日志实现(默认 [`NoopLogger`])。
     pub fn set_logger(&self, logger: Arc<dyn EventLogger>) {
         *self.inner.logger.write().unwrap() = logger;
     }
@@ -689,7 +689,7 @@ fn deliver_result<T: Send + 'static>(
         if timeout.is_zero() {
             let _ = cb.send(result);
         } else {
-            // 超时后静默丢弃(Go 版记录 warn)
+            // 超时后静默丢弃
             let _ = cb.send_timeout(result, timeout);
         }
         return;
@@ -768,7 +768,7 @@ impl<T> Drop for EventLoop<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Logger(注入式日志接口,对应 Go 版 logger.go)
+// Logger(注入式日志接口)
 // ---------------------------------------------------------------------------
 
 /// 注入式日志接口;默认 [`NoopLogger`] 静默。

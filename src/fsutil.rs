@@ -1,24 +1,22 @@
-//! 文件系统与路径辅助(移植自 go-utils/ioutil)。
+//! 文件系统与路径辅助。
 //!
-//! Go 版的 mode 位谓词函数未移植——Rust 的 [`std::fs::FileType`] 和
-//! [`std::os::unix::fs::PermissionsExt`] 已原生覆盖;`MatchPath` 的 glob
-//! 匹配放在 `glob` feature 之后。
+//! glob 模式匹配([`match_path`])位于 `glob` feature 下。
 
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// 获取当前工作目录(失败时 panic,与 Go 版一致)。
+/// 获取当前工作目录(失败时 panic)。
 pub fn working_dir() -> PathBuf {
     std::env::current_dir().expect("get working dir failed")
 }
 
-/// 获取可执行程序所在目录(失败时 panic,与 Go 版一致)。
+/// 获取可执行程序所在目录(失败时 panic)。
 pub fn exe_path() -> PathBuf {
     let exe = std::env::current_exe().expect("get exe path failed");
     exe.parent().map(Path::to_path_buf).unwrap_or(exe)
 }
 
-/// 递归列出 `root` 下的所有文件路径;失败时返回空(与 Go 版一致)。
+/// 递归列出 `root` 下的所有文件路径;失败时返回空。
 pub fn file_list(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     walk_files(root, &mut out);
@@ -107,7 +105,7 @@ pub fn dir_exists(path: &Path) -> bool {
     std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
 }
 
-/// [`exists`] 的别名(Go 版 `PathExist`)。
+/// [`exists`] 的别名。
 pub fn path_exist(path: &Path) -> bool {
     exists(path)
 }
@@ -144,7 +142,7 @@ pub fn is_nonempty_executable_file(path: &Path) -> bool {
     }
 }
 
-/// 读取文件;失败返回 `None`(与 Go 版返回 nil 一致)。
+/// 读取文件;失败返回 `None`。
 pub fn read_file(path: &Path) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
@@ -164,7 +162,7 @@ pub fn is_appendable(path: &Path) -> bool {
     std::fs::OpenOptions::new().append(true).open(path).is_ok()
 }
 
-/// glob 模式匹配路径(等价 Go 版 `MatchPath`,基于 `gobwas/glob` 的语法子集)。
+/// glob 模式匹配路径(基于 `glob` crate 的模式语法,支持 `*`、`**`、`?` 等)。
 #[cfg(feature = "glob")]
 pub fn match_path(pattern: &str, path: &str) -> bool {
     match glob::Pattern::new(pattern) {
@@ -259,7 +257,7 @@ mod tests {
 
         if created {
             assert!(link_exists(&link));
-            // file_exists 跟随符号链接(与 Go 的 os.Stat 语义一致)
+            // file_exists 跟随符号链接
             assert!(file_exists(&link));
             assert!(file_exists(&file));
             std::fs::remove_file(&link).unwrap();
@@ -307,8 +305,8 @@ mod tests {
     #[cfg(feature = "glob")]
     #[test]
     fn test_match_path() {
-        assert!(match_path("*.go", "main.go"));
-        assert!(!match_path("*.go", "main.rs"));
+        assert!(match_path("*.txt", "main.txt"));
+        assert!(!match_path("*.txt", "main.rs"));
         assert!(match_path("src/**/*.rs", "src/a/b.rs"));
     }
 }

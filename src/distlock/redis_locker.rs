@@ -1,19 +1,16 @@
-//! Redis 分布式锁后端(对应 Go 版 `distlock/redis_locker.go`,
-//! feature `distlock-redis`)。
+//! Redis 分布式锁后端(feature `distlock-redis`)。
 //!
-//! 线上协议为上游依赖 bsm/redislock v0.9.4 的逐式复刻:获取经
-//! Lua 脚本(`SET NX PX` 的原子包裹,附带同令牌前缀下的重入
-//! 分支),续期/释放为令牌比较的 `PEXPIRE`/`DEL` 脚本;令牌为
-//! 16 随机字节的 raw-base64url(上游 `randomToken`)。重试为
-//! 线性退避限次策略(上游 `LinearBackoff` + `LimitRetry`,由
-//! 锁级 [`Options`] 喂入)。
+//! 线上协议兼容 bsm/redislock v0.9.4:获取经 Lua 脚本(`SET NX
+//! PX` 的原子包裹,附带同令牌前缀下的重入分支),续期/释放为
+//! 令牌比较的 `PEXPIRE`/`DEL` 脚本;令牌为 16 随机字节的
+//! raw-base64url。重试为线性退避限次策略,由锁级 [`Options`]
+//! 喂入。
 //!
-//! 未移植(均未被上游包装层使用):TTL 查询脚本、`Metadata`/
-//! `Token` 自定义选项、`NoRetry`/`ExponentialBackoff` 策略。
-//! 重试期限以锁 TTL 为界(上游以调用方 ctx 的 deadline 兜底)。
-//! 请求路径依赖运行中的 Redis 实例,离线测试覆盖协议文本、
-//! 令牌、选项与策略、续期线程的停止语义,以及无监听端点的
-//! 错误透传。
+//! TTL 查询脚本、`Metadata`/`Token` 自定义选项、
+//! `NoRetry`/`ExponentialBackoff` 等策略暂未提供。重试期限以
+//! 锁 TTL 为界。请求路径依赖运行中的 Redis 实例,离线测试
+//! 覆盖协议文本、令牌、选项与策略、续期线程的停止语义,以及
+//! 无监听端点的错误透传。
 
 use crate::distlock::{Lock, LockOption, Locker, OnRefreshError, StopHandle, ERR_NOT_OBTAINED};
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -24,14 +21,13 @@ const DEFAULT_TTL: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_RETRIES: i64 = 10;
 const DEFAULT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
-/// 续期脚本(上游 redislock `luaRefresh`)。
+/// 续期脚本。
 const LUA_REFRESH: &str = "if redis.call(\"get\", KEYS[1]) == ARGV[1] then return redis.call(\"pexpire\", KEYS[1], ARGV[2]) else return 0 end";
 
-/// 释放脚本(上游 redislock `luaRelease`)。
+/// 释放脚本。
 const LUA_RELEASE: &str = "if redis.call(\"get\", KEYS[1]) == ARGV[1] then return redis.call(\"del\", KEYS[1]) else return 0 end";
 
-/// 获取脚本(上游 redislock `luaObtain`:NX PX 的原子包裹,
-/// 同令牌前缀下重入)。
+/// 获取脚本(NX PX 的原子包裹,同令牌前缀下重入)。
 const LUA_OBTAIN: &str = r#"
 if redis.call("set", KEYS[1], ARGV[1], "NX", "PX", ARGV[3]) then return redis.status_reply("OK") end
 
@@ -39,8 +35,7 @@ local offset = tonumber(ARGV[2])
 if redis.call("getrange", KEYS[1], 0, offset-1) == string.sub(ARGV[1], 1, offset) then return redis.call("set", KEYS[1], ARGV[1], "PX", ARGV[3]) end
 "#;
 
-/// 锁获取与续期行为配置(上游 `distlock.Options`;零值字段自动
-/// 补全默认值)。
+/// 锁获取与续期行为配置(零值字段自动补全默认值)。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Options {
     /// 锁的有效期;默认 30s。
@@ -54,7 +49,7 @@ pub struct Options {
 }
 
 impl Options {
-    /// 补全默认值(上游 `withDefaults`)。
+    /// 补全默认值。
     pub fn with_defaults(mut self) -> Self {
         if self.ttl <= Duration::ZERO {
             self.ttl = DEFAULT_TTL;
@@ -72,7 +67,7 @@ impl Options {
     }
 }
 
-/// 线性退避(上游 redislock `LinearBackoff`:恒定间隔)。
+/// 线性退避(恒定间隔)。
 struct LinearBackoff(Duration);
 
 impl LinearBackoff {
@@ -81,7 +76,7 @@ impl LinearBackoff {
     }
 }
 
-/// 限次重试(上游 redislock `LimitRetry`:计数达到上限后归零)。
+/// 限次重试(计数达到上限后归零)。
 struct LimitedRetry {
     inner: LinearBackoff,
     cnt: AtomicI64,
@@ -98,16 +93,14 @@ impl LimitedRetry {
     }
 }
 
-/// 随机令牌(上游 redislock `randomToken`:16 随机字节 →
-/// raw-base64url)。
+/// 随机令牌(16 随机字节 → raw-base64url)。
 fn random_token() -> String {
     let mut buf = [0u8; 16];
     getrandom::fill(&mut buf).expect("getrandom");
     base64_rawurl_encode(&buf)
 }
 
-/// raw-base64url 编码(上游 `base64.RawURLEncoding`:URL 安全
-/// 字母表、无填充)。
+/// raw-base64url 编码(URL 安全字母表、无填充)。
 fn base64_rawurl_encode(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
@@ -130,14 +123,12 @@ fn base64_rawurl_encode(data: &[u8]) -> String {
     out
 }
 
-/// 已获取的 Redis 锁(上游 `redisLock` 与 redislock.Lock 的合并:
-/// 上游包装层不设元数据,锁值即令牌)。
+/// 已获取的 Redis 锁(不设元数据,锁值即令牌)。
 pub struct RedisLock {
     inner: Arc<LockInner>,
 }
 
-/// 锁的共享状态(供后台续期线程持有;上游 Go 协程按 GC 存活
-/// 持有锁对象,此处以引用计数等价)。
+/// 锁的共享状态(供后台续期线程持有,以引用计数保持存活)。
 struct LockInner {
     client: redis::Client,
     key: String,
@@ -147,8 +138,8 @@ struct LockInner {
 }
 
 impl LockInner {
-    /// 运行续期脚本(上游 redislock `Refresh`:应答 1 → 成功,
-    /// 其余 → 上游 `redislock: not obtained`)。
+    /// 运行续期脚本(应答 1 → 成功,其余 →
+    /// `redislock: not obtained`)。
     fn run_refresh_script(&self) -> Result<(), String> {
         let mut con = self.client.get_connection().map_err(|e| e.to_string())?;
         let status = redis::Script::new(LUA_REFRESH)
@@ -163,8 +154,8 @@ impl LockInner {
         Err("redislock: not obtained".to_string())
     }
 
-    /// 运行释放脚本(上游 redislock `Release`:应答非 1 一律
-    /// 上游 `redislock: lock not held`)。
+    /// 运行释放脚本(应答非 1 一律返回
+    /// `redislock: lock not held`)。
     fn run_release_script(&self) -> Result<(), String> {
         let mut con = self.client.get_connection().map_err(|e| e.to_string())?;
         let status = redis::Script::new(LUA_RELEASE)
@@ -181,7 +172,7 @@ impl LockInner {
 
 impl Lock for RedisLock {
     fn key(&self) -> String {
-        // 上游 Key():redislock 返回其锁键
+        // 返回锁键
         self.inner.key.clone()
     }
 
@@ -194,8 +185,8 @@ impl Lock for RedisLock {
     }
 
     fn start_refresh(&self, on_error: Option<OnRefreshError>) -> StopHandle {
-        // 上游:固定间隔的 ticker,ctx 取消即时生效;续期失败
-        // 即回调并退出。停止信道被丢弃时同样退出(见包级文档)。
+        // 固定间隔定时续期;续期失败即回调并退出。停止信道被
+        // 丢弃时同样退出(见包级文档)。
         let (sender, receiver) = std::sync::mpsc::channel::<()>();
         let inner = Arc::clone(&self.inner);
         let interval = self.inner.refresh_interval;
@@ -219,14 +210,14 @@ impl Lock for RedisLock {
     }
 }
 
-/// Redis 分布式锁后端(上游 `RedisLocker`)。
+/// Redis 分布式锁后端。
 pub struct RedisLocker {
     client: redis::Client,
     opts: Options,
 }
 
 impl RedisLocker {
-    /// 创建(上游 `NewRedisLocker`;opts 补全默认值)。
+    /// 创建(opts 补全默认值)。
     pub fn new(client: redis::Client, opts: Options) -> Self {
         Self {
             client,
@@ -234,12 +225,12 @@ impl RedisLocker {
         }
     }
 
-    /// 运行获取脚本(上游 redislock `obtain`:status 应答 →
-    /// 拿到;nil 应答 → 未拿到继续退避;其余为底层错误)。
+    /// 运行获取脚本(status 应答 → 拿到;nil 应答 → 未拿到
+    /// 继续退避;其余为底层错误)。
     fn run_obtain_script(&self, key: &str, value: &str, ttl_ms: i64) -> Result<bool, String> {
         let mut con = self.client.get_connection().map_err(|e| e.to_string())?;
-        // Option<()>:脚本返回 nil 映射为 None(上游 redis.Nil
-        // → 未拿到),status 应答映射为 Some(())(上游 → 拿到)
+        // Option<()>:脚本返回 nil 映射为 None(未拿到),
+        // status 应答映射为 Some(())(拿到)
         let outcome = redis::Script::new(LUA_OBTAIN)
             .key(key)
             .arg(value)
@@ -253,8 +244,8 @@ impl RedisLocker {
 
 impl Locker for RedisLocker {
     fn obtain(&self, key: &str, _opts: &[LockOption]) -> Result<Box<dyn Lock>, String> {
-        // 上游:每次尝试的锁值为随机令牌(无元数据),TTL 以
-        // 毫秒串传入脚本;重试为线性退避限次,期限以 TTL 为界
+        // 每次尝试的锁值为随机令牌(无元数据),TTL 以毫秒串
+        // 传入脚本;重试为线性退避限次,期限以 TTL 为界
         let value = random_token();
         let ttl_ms = self.opts.ttl.as_millis() as i64;
         let deadline = Instant::now().checked_add(self.opts.ttl);
@@ -275,8 +266,8 @@ impl Locker for RedisLocker {
                     }),
                 }));
             }
-            // 上游:重试预算耗尽 → 未获取哨兵;期限已到 → 上游
-            // ctx 到期错误文案
+            // 重试预算耗尽 → 未获取哨兵;期限已到 → ctx 到期
+            // 错误文案
             let backoff = retry.next_backoff();
             if backoff < Duration::from_millis(1) {
                 return Err(ERR_NOT_OBTAINED.to_string());
@@ -289,12 +280,12 @@ impl Locker for RedisLocker {
     }
 
     fn close(&self) -> Result<(), String> {
-        // 上游:redislock 无待关闭资源,Close 为 no-op
+        // 无待关闭资源,Close 为空操作
         Ok(())
     }
 
     fn is_locked(&self, key: &str) -> Result<bool, String> {
-        // 上游:以获取探测;未拿到 → 已加锁;其它错误透传;
+        // 以获取探测;未拿到 → 已加锁;其它错误透传;
         // 拿到 → 立即释放并返回未加锁
         match self.obtain(key, &[]) {
             Err(e) if e == ERR_NOT_OBTAINED => Ok(true),
@@ -314,7 +305,7 @@ mod tests {
 
     #[test]
     fn redis_options_defaults() {
-        // 上游 withDefaults:零值补默认(30s/10/100ms/refresh=TTL/3)
+        // 零值补默认(30s/10/100ms/refresh=TTL/3)
         let o = Options::default().with_defaults();
         assert_eq!(o.ttl, Duration::from_secs(30));
         assert_eq!(o.max_retries, 10);
@@ -342,7 +333,7 @@ mod tests {
 
     #[test]
     fn redis_locker_applies_defaults() {
-        // 上游 NewRedisLocker:构造时补全默认值
+        // 构造时补全默认值
         let client = redis::Client::open("redis://127.0.0.1:1/").unwrap();
         let locker = RedisLocker::new(client, Options::default());
         assert_eq!(locker.opts.ttl, Duration::from_secs(30));
@@ -372,7 +363,7 @@ mod tests {
 
     #[test]
     fn redis_scripts_verbatim() {
-        // 锁定协议文本(上游 redislock v0.9.4 逐字)
+        // 锁定协议文本(兼容 bsm/redislock v0.9.4,逐字)
         assert_eq!(
             LUA_REFRESH,
             "if redis.call(\"get\", KEYS[1]) == ARGV[1] then return redis.call(\"pexpire\", KEYS[1], ARGV[2]) else return 0 end"
@@ -394,7 +385,7 @@ if redis.call(\"getrange\", KEYS[1], 0, offset-1) == string.sub(ARGV[1], 1, offs
 
     #[test]
     fn redis_token_rawurl() {
-        // 独立预计算的 raw-base64url 向量(上游 RawURLEncoding)
+        // 独立预计算的 raw-base64url 向量
         assert_eq!(base64_rawurl_encode(&[0u8; 16]), "AAAAAAAAAAAAAAAAAAAAAA");
         assert_eq!(
             base64_rawurl_encode(&(0u8..16).collect::<Vec<u8>>()),

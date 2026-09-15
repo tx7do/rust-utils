@@ -1,11 +1,7 @@
-//! 加密货币钱包地址的格式校验(移植自 go-utils/cryptocurrency)。
+//! 加密货币钱包地址的格式校验。
 //!
-//! 与 Go 版一致,仅做**格式**校验(前缀 + 字符集 + 长度),
+//! 仅做**格式**校验(前缀 + 字符集 + 长度),
 //! 不做 base58/checksum 校验。
-//!
-//! 相对 Go 版的两处修正:
-//! - `xmr` 正则里多了一个前导 `/`(永远匹配不上),已去掉;
-//! - `trc` 正则未加锚点(任意包含 `T`+33 位子串的字符串都能通过),已加锚点。
 
 /// 钱包类型标识:比特币(BTC / OMNI)。
 pub const WALLET_BTC: &str = "btc";
@@ -32,7 +28,7 @@ pub const WALLET_TRC: &str = "trc";
 /// `determine_wallet_type` 对未识别前缀的兜底类型。
 pub const WALLET_OMINI: &str = "omini";
 
-/// Go 版 `[a-zA-HJ-NP-Z0-9]`:字母数字,排除易混淆的大写 I / O。
+/// BTC 字符集 `[a-zA-HJ-NP-Z0-9]`:字母数字,排除易混淆的大写 I / O。
 fn is_btc_charset(c: char) -> bool {
     c.is_ascii_alphanumeric() && c != 'I' && c != 'O'
 }
@@ -121,7 +117,7 @@ fn is_valid_xmr_address(address: &str) -> bool {
 /// 校验钱包地址,返回命中的钱包类型;未命中返回空字符串。
 ///
 /// 按 btc → btg → dash → dgb → eth → smart → xrp → zcr → zec → xmr → trc
-/// 的固定顺序匹配(Go 版依赖 map 遍历,顺序随机)。
+/// 的固定顺序匹配。
 pub fn is_valid_cryptocurrency_address(address: &str) -> &'static str {
     if address.is_empty() {
         return "";
@@ -197,7 +193,7 @@ mod tests {
 
     #[test]
     fn test_invalid_addresses() {
-        // 这些地址不属于所声称的币种(Go 版测试口径:结果 != 声称类型)
+        // 这些地址不属于所声称的币种(校验口径:结果 != 声称类型)
         let cases = [
             ("2CFNjwLjZdSKB8nZopxhLaR8vvqaQKD3Bi", ""),
             ("bc2qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", ""),

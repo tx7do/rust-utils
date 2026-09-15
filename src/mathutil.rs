@@ -1,4 +1,4 @@
-//! 数值与统计辅助,含手写实现的正态分布(移植自 go-utils/math)。
+//! 数值与统计辅助,含手写实现的正态分布。
 //!
 //! 求和用 `iter().sum()`,符号函数见 [`sign`]。
 
@@ -7,7 +7,7 @@ pub fn sign<T: Signed>(x: T) -> T {
     x.sign()
 }
 
-/// 可取符号的数值类型抽象,覆盖 Go 版 `Sign` 支持的全部类型。
+/// 可取符号的数值类型抽象,覆盖内置的有符号整数与浮点类型。
 pub trait Signed: Copy {
     fn sign(self) -> Self;
 }
@@ -105,7 +105,7 @@ pub struct Gaussian {
 }
 
 impl Gaussian {
-    /// 构造正态分布;`variance <= 0` 时 panic(与 Go 版一致)。
+    /// 构造正态分布;`variance <= 0` 时 panic。
     pub fn new(mean: f64, variance: f64) -> Self {
         assert!(variance > 0.0, "variance must be positive");
         Gaussian {

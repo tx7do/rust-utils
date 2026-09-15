@@ -1,4 +1,4 @@
-//! JWT 辅助层(移植自 go-utils/jwtutil),feature `jwt`。
+//! JWT 辅助层,feature `jwt`。
 //!
 //! 基于 `jsonwebtoken` v9,默认 HS256。载荷为 `serde_json::Value`
 //! (即 claims 对象)。
@@ -46,7 +46,7 @@ pub fn generate_jwt(claims: Value, secret: &str, alg: Algorithm) -> Result<Strin
 /// 解析并校验 JWT,返回 claims 对象。
 pub fn parse_jwt_payload(token: &str, secret: &str) -> Result<Value, JwtError> {
     let mut validation = Validation::new(Algorithm::HS256);
-    validation.validate_exp = false; // 与 Go 版行为一致:Parse 不强制校验过期
+    validation.validate_exp = false; // Parse 不强制校验过期(校验交给 verify)
     validation.required_spec_claims.clear();
     let data = jsonwebtoken::decode::<Value>(
         token,

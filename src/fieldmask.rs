@@ -1,22 +1,15 @@
-//! 字段掩码(对应 Go 版 `fieldmaskutil`,feature `fieldmask`)。
+//! 字段掩码(feature `fieldmask`),作用于 `serde_json::Value`。
 //!
-//! Go 版基于 proto 反射(`proto.Message` + `protoreflect` 描述符)
-//! 实现 `NestedMask` 的构建与 Filter/Prune/Overwrite/Validate。Rust
-//! 没有 proto 反射,这里把同一套语义移植到 `serde_json::Value`
-//! 上:JSON 对象同时对应 proto 的普通字段与 map 字段,map 键即
-//! 对象键。与上游的固有差异:
+//! [`NestedMask`] 为递归掩码树,提供构建与 Filter/Prune/
+//! Overwrite/Validate。JSON 对象同时对应普通字段与 map 字段,
+//! 统一采用保守语义(掩码内标量同样要求出现在掩码中,详见各
+//! 方法文档)。
 //!
-//! - 对象统一采用上游**普通字段**分支的语义(掩码中出现的标量
-//!   键在 Prune/Overwrite 的非空子掩码下保留/不动,而上游的 map
-//!   分支会清除/复制之——JSON 中两者不可区分,取保守侧);
-//! - `Validate` 的"消息描述符"以模板 JSON 对象代替(检查键存在
-//!   与可下钻性);`fieldmaskpb.FieldMask` 包装与
-//!   `PathsFromFieldNumbers`(字段号→路径)为 proto 专属,未移植;
-//! - `NormalizePaths` 照搬上游:先做 `id_`/`_id` → `id` 的修正,
+//! - `Validate` 以模板 JSON 对象充当消息描述符(检查键存在
+//!   与可下钻性);proto 消息描述符与字段号→路径转换不在
+//!   范围内,不提供;
+//! - `NormalizePaths`:先做 `id_`/`_id` → `id` 的修正,
 //!   再转 snake_case([`crate::stringcase::snake_case`])。
-//!
-//! 以上差异与语义统一(对象字段与 map 字段在 JSON 中不可区分,
-//! 统一取上游普通字段分支的保守语义)一并见上文各方法文档。
 //!
 //! ```
 //! use rust_utils::fieldmask::NestedMask;
@@ -33,12 +26,12 @@ use serde_json::{Map, Value};
 
 use crate::stringcase::snake_case;
 
-/// 递归掩码树(上游 `NestedMask`;叶子与空子树等价)。
+/// 递归掩码树(叶子与空子树等价)。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NestedMask(BTreeMap<String, NestedMask>);
 
 impl NestedMask {
-    /// 由点分路径构建(上游 `NestedMaskFromPaths`)。
+    /// 由点分路径构建。
     ///
     /// 例如 `["foo.bar", "foo.baz"]` 得到 `{"foo": {"bar": {}, "baz": {}}}`。
     /// 空路径、空前段/后段为无效输入,跳过。
@@ -50,7 +43,7 @@ impl NestedMask {
         mask
     }
 
-    /// 保留掩码列出的字段、清除其余(上游 `NestedMask.Filter`)。
+    /// 保留掩码列出的字段、清除其余。
     ///
     /// 空掩码不做任何事。复合值(对象、数组中的对象元素)在非空
     /// 子掩码下递归。
@@ -77,10 +70,9 @@ impl NestedMask {
         }
     }
 
-    /// 清除掩码列出的字段、保留其余(上游 `NestedMask.Prune`;
-    /// [`Self::filter`] 的反操作)。
+    /// 清除掩码列出的字段、保留其余([`Self::filter`] 的反操作)。
     ///
-    /// 标量键在非空子掩码下按上游普通字段分支语义保留。
+    /// 标量键在非空子掩码下保留。
     pub fn prune(&self, value: &mut Value) {
         if self.0.is_empty() {
             return;
@@ -104,11 +96,10 @@ impl NestedMask {
         }
     }
 
-    /// 把 `src` 中掩码列出的字段覆写到 `dest`(上游
-    /// `NestedMask.Overwrite`)。
+    /// 把 `src` 中掩码列出的字段覆写到 `dest`。
     ///
-    /// 空子掩码:源中存在且非 null 即整体覆盖,否则(缺失或 null,
-    /// 对应上游默认值)清除目标键。非空子掩码:复合值递归,目标
+    /// 空子掩码:源中存在且非 null 即整体覆盖,否则(缺失或
+    /// null)清除目标键。非空子掩码:复合值递归,目标
     /// 侧缺失或类型不符的对象/数组先初始化再递归;数组按源长度
     /// 截断/补齐后逐元素处理。
     pub fn overwrite(&self, src: &Value, dest: &mut Value) {
@@ -163,8 +154,8 @@ impl NestedMask {
         }
     }
 
-    /// 校验掩码路径对模板对象的合法性(上游 `NestedMask.Validate`
-    /// 的模板版:模板 JSON 对象充当消息描述符)。
+    /// 校验掩码路径对模板对象的合法性(模板 JSON 对象充当消息
+    /// 描述符)。
     pub fn validate(&self, template: &Value) -> Result<(), String> {
         match self.validate_inner("", template) {
             Ok(()) => Ok(()),
@@ -246,8 +237,7 @@ fn full_path(path_prefix: &str, field: &str) -> String {
     format!("{path_prefix}.{field}")
 }
 
-/// 掩码路径归一化(上游 `NormalizePaths`:`id_`/`_id` 修正为
-/// `id`,再转 snake_case)。
+/// 掩码路径归一化(`id_`/`_id` 修正为 `id`,再转 snake_case)。
 pub fn normalize_paths(paths: &mut [String]) {
     for p in paths.iter_mut() {
         if p == "id_" || p == "_id" {
@@ -257,8 +247,7 @@ pub fn normalize_paths(paths: &mut [String]) {
     }
 }
 
-/// 返回顶层缺位(null 或缺失)的路径集合(上游 `NilValuePaths`,
-/// 顶层 `Has` 语义)。
+/// 返回顶层缺位(null 或缺失)的路径集合。
 pub fn nil_value_paths(value: &Value, paths: &[String]) -> Vec<String> {
     let Value::Object(map) = value else {
         return Vec::new();
@@ -277,7 +266,7 @@ mod tests {
 
     #[test]
     fn nested_mask_from_paths_table() {
-        // 上游 Test_NestedMaskFromPaths 的用例表
+        // from_paths 的用例表
         assert_eq!(
             nested_mask_paths(&["a", "b", "c"]),
             m(&[("a", leaf()), ("b", leaf()), ("c", leaf())])
@@ -342,7 +331,7 @@ mod tests {
 
     #[test]
     fn prune_scalar_with_nested_mask_kept() {
-        // 上游普通字段分支语义:标量键 + 非空子掩码 → 保留
+        // 保守语义:标量键 + 非空子掩码 → 保留
         let mut doc = json!({"a": 1, "b": 2});
         nested_mask_paths(&["b.zz"]).prune(&mut doc);
         assert_eq!(doc, json!({"a": 1, "b": 2}));
@@ -409,7 +398,7 @@ mod tests {
             nested_mask_paths(&["scalar.deep"])
                 .validate(&template)
                 .unwrap_err(),
-            // 顶层字段缺位(无前缀形态,同上游 fullPath)
+            // 顶层字段缺位(无前缀形态)
             "invalid mask: unknown path: 'scalar'"
         );
         let scalar_template = json!({"scalar": 1});

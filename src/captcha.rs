@@ -1,32 +1,31 @@
-//! 验证码服务 —— go-utils/captcha 的全功能移植,feature `captcha`。
+//! 验证码服务,feature `captcha`。
 //!
-//! 与 Go 版一一对应的七种驱动([`Captcha::generate`] 按配置分发):
-//! - 文本四类(`Digit` / `String` / `Math` / `Chinese`):对齐
-//!   base64Captcha 的行为。数字驱动为 dchest 系点阵圆填充渲染
-//!   (内置同款 11×18 数字位图、剪切漂移、穿透线、正弦扭曲、干扰圆);
-//!   其余三类为列布局 + 逐字随机字号与深浅色 + 噪声字符。上游
-//!   wrapper 未把配置中的颜色接线到驱动,运行期背景恒为随机浅色、
-//!   字形恒为随机深色,配置中的颜色字段与上游一致为惰性字段。
-//!   `Chinese` 驱动的字符池与上游一致取 `language` 字段(默认
+//! 七种驱动([`Captcha::generate`] 按配置分发):
+//! - 文本四类(`Digit` / `String` / `Math` / `Chinese`):输出与
+//!   base64Captcha 前端组件兼容。数字驱动为点阵圆填充渲染
+//!   (内置 11×18 数字位图,与 base64Captcha 的 digitFontData
+//!   逐字节一致,Apache-2.0;外加剪切漂移、穿透线、正弦扭曲、
+//!   干扰圆);其余三类为列布局 + 逐字随机字号与深浅色 + 噪声字符。
+//!   运行期背景恒为随机浅色、字形恒为随机深色,配置中的颜色字段
+//!   为惰性字段。`Chinese` 驱动的字符池取 `language` 字段(默认
 //!   `"zh"`;按逗号切分的三分支语义见 `chinese_text`)。
 //! - 图形三类:`Slide`(滑块)/ `Click`(点选)/ `Rotate`(旋转):
-//!   输出 JSON 的结构、字段名、ID 格式与 Go 版一致;主图 JPEG、
-//!   其余图片 PNG 的编码约定同上游。
+//!   输出 JSON 的结构、字段名、ID 格式与 base64Captcha 前端组件
+//!   兼容;主图 JPEG、其余图片 PNG。
 //!
 //! 存储层为 [`Store`] trait(带过期的存取),默认 [`MemoryStore`]
 //! 零依赖,Redis 落地见 [`RedisStore`](feature `captcha-redis`);
-//! 键名与 Go 版一致:`{key_prefix}:{id}`。
+//! 键名为 `{key_prefix}:{id}`。
 //!
-//! 与 Go 版的固有差异(上游因素材缺失不可用的部分,本库以程序
-//! 生成的替身素材实现同构管线):滑块与点选的背景为 wrapper 同款
-//! 渐变公式;点选字形为内嵌 GNU Unifont 位图子集(见
-//! `assets/captcha/README.md`),干扰图元(填充圆、折线、正弦扭曲)
-//! 逐式移植自上游;旋转驱动的圆盘为径向图案替身。上游 `rotate`
-//! builder 不读 wrapper 配置,本库同 Go 行为恒取上游默认常量
-//! (220×220、缩略 {140,150,160,170}、角度 [30,330]),
-//! `RotateConfig` 字段与 Go 一致为惰性。上游点选验证因期望答案被
-//! 序列化为对象而自身按数组解析、恒为失败;本库将同数据存为
-//! 数组,使逐点 ±10px 的原验证语义可用。
+//! 实现说明:
+//! - 全部图像素材由程序自绘:滑块与点选背景为渐变公式
+//!   (见 `paste_gradient`),点选字形为内嵌 GNU Unifont 位图子集
+//!   (见 `assets/captcha/README.md`),干扰图元(填充圆、折线、
+//!   正弦扭曲)自行实现;旋转驱动的圆盘为程序生成的径向图案。
+//! - 旋转驱动恒取内置常量(主图 220×220、缩略边长
+//!   {140,150,160,170}、角度 [30,330] 闭区间),`RotateConfig`
+//!   字段为惰性。
+//! - 点选期望答案按数组存储,逐点 ±10px 的验证语义因此可用。
 //!
 //! ```
 //! use rust_utils::captcha::{Captcha, Config, DriverKind};
@@ -61,7 +60,7 @@ const UNIFONT_BIN: &[u8] = include_bytes!("../assets/captcha/unifont_cjk.bin");
 // 驱动类型与配置
 // ---------------------------------------------------------------------------
 
-/// 验证码驱动类型(对应 Go 版 `DriverType` 常量)。
+/// 验证码驱动类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DriverKind {
     Digit,
@@ -265,7 +264,7 @@ impl Default for RotateConfig {
     }
 }
 
-/// 总配置(对应 Go 版 `Config`;默认值与 `DefaultConfig()` 一致)。
+/// 总配置(驱动选择与各驱动子配置)。
 #[derive(Debug, Clone, Default)]
 pub struct Config {
     /// 驱动类型(默认 `Digit`)。
@@ -284,8 +283,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// 以指定驱动类型构造配置(其余取默认,对应 Go 的
-    /// `DefaultConfig()` + `WithDriverType`)。
+    /// 以指定驱动类型构造配置(其余字段取默认值)。
     pub fn with_driver(driver: DriverKind) -> Self {
         Config {
             driver: Some(driver),
@@ -319,10 +317,10 @@ impl Config {
 }
 
 // ---------------------------------------------------------------------------
-// 输出数据结构(JSON 字段名与 Go 版一致)
+// 输出数据结构
 // ---------------------------------------------------------------------------
 
-/// 滑块拼图输出(对应 Go `SlideCaptchaData`)。
+/// 滑块拼图输出。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlideCaptchaData {
     pub id: String,
@@ -331,7 +329,7 @@ pub struct SlideCaptchaData {
     pub x_position: i32,
 }
 
-/// 点选输出(对应 Go `ClickCaptchaData`)。
+/// 点选输出。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClickCaptchaData {
     pub id: String,
@@ -340,7 +338,7 @@ pub struct ClickCaptchaData {
     pub dots: HashMap<i32, ClickDot>,
 }
 
-/// 点选点位(对应 Go `Dot`;`char` 恒为空串,与 Go 输出一致)。
+/// 点选点位(`char` 恒为空串)。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClickDot {
     pub x: i32,
@@ -351,7 +349,7 @@ pub struct ClickDot {
     pub angle: i32,
 }
 
-/// 旋转输出(对应 Go `RotateCaptchaData`)。
+/// 旋转输出。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RotateCaptchaData {
     pub id: String,
@@ -525,7 +523,7 @@ impl Store for RedisStore {
 // 服务层
 // ---------------------------------------------------------------------------
 
-/// 验证码服务(对应 Go 版 `Captcha`):生成后答案自动入库,
+/// 验证码服务:生成后答案自动入库,
 /// 键为 `{key_prefix}:{id}`、TTL 为 `expire`。
 pub struct Captcha<S: Store> {
     store: S,
@@ -562,7 +560,7 @@ impl<S: Store> Captcha<S> {
     /// 生成验证码,返回 `(id, 图片或 JSON, 明文答案)`。
     ///
     /// 文本驱动返回 PNG 数据 URI;图形驱动返回对应数据结构的
-    /// JSON(结构内嵌图片数据 URI),与 Go 版 `Generate` 一致。
+    /// JSON(结构内嵌图片数据 URI)。
     pub fn generate(&self) -> Result<(String, String, String), String> {
         let cfg = self.config.read().unwrap().clone();
         let mut rng = rand::rng();
@@ -624,18 +622,18 @@ impl<S: Store> Captcha<S> {
         Ok((id, b64, answer))
     }
 
-    /// 手动保存答案(对应 Go 版 `Save`;键与 TTL 同 [`generate`])。
+    /// 手动保存答案(键与 TTL 同 [`generate`])。
     pub fn save(&self, id: &str, answer: &str) -> Result<(), String> {
         let ttl = self.config.read().unwrap().expire();
         self.store.save(&self.key(id), answer, ttl)
     }
 
-    /// 校验并删除(对应 Go 版 `Verify`):答案匹配即删除。
+    /// 校验并删除:答案匹配即删除。
     pub fn verify(&self, id: &str, input: &str) -> Result<bool, String> {
         self.verify_impl(id, input, true)
     }
 
-    /// 只校验不删除(对应 Go 版 `VerifyWithoutDelete`)。
+    /// 只校验不删除。
     pub fn verify_keep(&self, id: &str, input: &str) -> Result<bool, String> {
         self.verify_impl(id, input, false)
     }
@@ -658,27 +656,27 @@ impl<S: Store> Captcha<S> {
         Ok(matched)
     }
 
-    /// 删除验证码(对应 Go 版 `Delete`)。
+    /// 删除验证码。
     pub fn delete(&self, id: &str) -> Result<(), String> {
         self.store.delete(&self.key(id))
     }
 
-    /// 是否存在(对应 Go 版 `Exists`)。
+    /// 是否存在。
     pub fn exists(&self, id: &str) -> Result<bool, String> {
         self.store.exists(&self.key(id))
     }
 
-    /// 剩余有效期(对应 Go 版 `GetRemainingTime`)。
+    /// 剩余有效期。
     pub fn get_remaining_time(&self, id: &str) -> Result<Option<Duration>, String> {
         self.store.remaining_ttl(&self.key(id))
     }
 
-    /// 更新配置(对应 Go 版 `SetConfig`)。
+    /// 更新配置。
     pub fn set_config(&self, config: Config) {
         *self.config.write().unwrap() = config;
     }
 
-    /// 当前配置(对应 Go 版 `GetConfig`)。
+    /// 当前配置。
     pub fn get_config(&self) -> Config {
         self.config.read().unwrap().clone()
     }
@@ -689,13 +687,12 @@ impl<S: Store> Captcha<S> {
     }
 }
 
-/// 存储键:`{key_prefix}:{id}`(对应 Go 版的键拼装)。
+/// 存储键:`{key_prefix}:{id}`。
 fn store_key(prefix: &str, id: &str) -> String {
     format!("{prefix}:{id}")
 }
 
-// 上游未接线的子配置在此取默认值(对应 Go wrapper 的
-// `if cfg == nil { cfg = Default...Config() }` 语义)。
+// 未设置的子配置在生成时取对应默认值。
 impl Config {
     fn digit(&self) -> DigitConfig {
         self.digit_config.clone().unwrap_or_default()
@@ -726,7 +723,7 @@ impl Config {
 // 验证
 // ---------------------------------------------------------------------------
 
-/// 期望答案点位(字段名与上游 `click.Dot` 的 json tag 逐字一致)。
+/// 期望答案点位(点选答案在存储层的序列化结构)。
 #[derive(Serialize, Deserialize)]
 struct ExpectedClickDot {
     index: i32,
@@ -742,14 +739,14 @@ struct ExpectedClickDot {
     color2: String,
 }
 
-/// 用户输入点位(上游 `[]map[string]interface{}` 中的 `x`/`y`)。
+/// 用户输入点位(仅需 `x` / `y` 两个字段)。
 #[derive(Serialize, Deserialize)]
 struct UserClickDot {
     x: f64,
     y: f64,
 }
 
-/// 滑块验证(上游 `verifySlide`:仅比较 X、容差 ±5px)。
+/// 滑块验证(仅比较 X、容差 ±5px)。
 fn verify_slide(expected: &str, actual: &str) -> bool {
     let (Some(e), Some(a)) = (parse_int_prefix(expected), parse_int_prefix(actual)) else {
         return false;
@@ -757,7 +754,7 @@ fn verify_slide(expected: &str, actual: &str) -> bool {
     e.abs_diff(a) <= 5
 }
 
-/// 点选验证(上游 `verifyClick`:数量相等且逐点 ±10px)。
+/// 点选验证(数量相等且逐点 ±10px)。
 fn verify_click(expected: &str, actual: &str) -> bool {
     let (Ok(exp), Ok(act)) = (
         serde_json::from_str::<Vec<ExpectedClickDot>>(expected),
@@ -778,7 +775,7 @@ fn verify_click(expected: &str, actual: &str) -> bool {
     true
 }
 
-/// 旋转验证(上游 `verifyRotate`:环形角度差、容差 ±5°)。
+/// 旋转验证(环形角度差、容差 ±5°)。
 fn verify_rotate(expected: &str, actual: &str) -> bool {
     let (Some(e), Some(a)) = (parse_int_prefix(expected), parse_int_prefix(actual)) else {
         return false;
@@ -790,8 +787,8 @@ fn verify_rotate(expected: &str, actual: &str) -> bool {
     diff <= 5
 }
 
-/// 前导十进制整数(模拟 Go `fmt.Sscanf("%d")`:跳过前导空白、
-/// 允许符号、取最长数字前缀;溢出或无数字视为失败)。
+/// 前导十进制整数(跳过前导空白、允许符号、取最长数字前缀;
+/// 溢出或无数字视为失败)。
 fn parse_int_prefix(s: &str) -> Option<i32> {
     let t = s.trim_start();
     let (sign, digits) = if let Some(r) = t.strip_prefix('-') {
@@ -823,19 +820,18 @@ fn parse_int_prefix(s: &str) -> Option<i32> {
 // 采样与颜色
 // ---------------------------------------------------------------------------
 
-/// [min, max] 闭区间(上游 `random.RandIntFast`,含大小交换)。
+/// [min, max] 闭区间(含大小交换)。
 fn ri_fast(rng: &mut impl Rng, min: i32, max: i32) -> i32 {
     let (lo, hi) = if min > max { (max, min) } else { (min, max) };
     rng.random_range(lo..=hi)
 }
 
-/// [0, n) 半开区间(上游 `rand.Intn`)。
+/// [0, n) 半开区间。
 fn ri_n(rng: &mut impl Rng, n: i32) -> i32 {
     rng.random_range(0..n)
 }
 
-/// [from, to) 半开区间(上游 base64Captcha `randIntRange`,
-/// `to - from <= 0` 时返回 `from`)。
+/// [from, to) 半开区间(`to - from <= 0` 时返回 `from`)。
 fn ri_range(rng: &mut impl Rng, from: i32, to: i32) -> i32 {
     if to - from <= 0 {
         from
@@ -844,17 +840,17 @@ fn ri_range(rng: &mut impl Rng, from: i32, to: i32) -> i32 {
     }
 }
 
-/// [0,1) 均匀(上游 `rand.Float64`)。
+/// [0,1) 均匀。
 fn rf(rng: &mut impl Rng) -> f64 {
     rng.random::<f64>()
 }
 
-/// 均匀取表项(上游 `RandIndex` 索引采样)。
+/// 均匀取表项(索引采样)。
 fn pick<T: Copy>(rng: &mut impl Rng, list: &[T]) -> T {
     list[rng.random_range(0..list.len())]
 }
 
-/// 随机浅色(上游 `RandLightColor`,各通道 [200,254])。
+/// 随机浅色(各通道 [200,254])。
 fn rand_light_color(rng: &mut impl Rng) -> [u8; 4] {
     let mut c = [0u8; 4];
     for v in c.iter_mut().take(3) {
@@ -864,8 +860,7 @@ fn rand_light_color(rng: &mut impl Rng) -> [u8; 4] {
     c
 }
 
-/// 随机深色(上游 `RandDeepColor`:`RandColor` 加亮偏移,
-/// 通道按 Go 的 `uint8` 截断回绕)。
+/// 随机深色(基色加亮偏移,通道按 `u8` 截断回绕)。
 fn rand_deep_color(rng: &mut impl Rng) -> [u8; 4] {
     let red = ri_n(rng, 255);
     let green = ri_n(rng, 255);
@@ -887,8 +882,8 @@ fn rand_deep_color(rng: &mut impl Rng) -> [u8; 4] {
     [rgb[0], rgb[1], rgb[2], 255]
 }
 
-/// 上游 `randomBrightness`(通道按 Go 的 `uint8` 回绕;上游
-/// `maxc > 255` 分支对 u8 恒假,略)。
+/// 颜色亮度扰动(通道按 `u8` 回绕;`maxc > 255` 分支对
+/// `u8` 恒假,略)。
 fn random_brightness(rng: &mut impl Rng, c: [u8; 4]) -> [u8; 4] {
     let minc = c[0].min(c[1]).min(c[2]);
     let maxc = c[0].max(c[1]).max(c[2]);
@@ -900,8 +895,7 @@ fn random_brightness(rng: &mut impl Rng, c: [u8; 4]) -> [u8; 4] {
     out
 }
 
-/// `#RRGGBB` / `#RGB` 解析(上游 `ParseHexColor`;解析失败
-/// 返回黑色,同上游忽略错误的零值行为)。
+/// `#RRGGBB` / `#RGB` 解析(解析失败返回黑色)。
 fn parse_hex_color(s: &str) -> [u8; 4] {
     let invalid = [0, 0, 0, 255];
     let Some(rest) = s.strip_prefix('#') else {
@@ -939,7 +933,7 @@ fn hex_val(b: u8) -> Option<u8> {
 // 题面与答案
 // ---------------------------------------------------------------------------
 
-/// 均匀取 `size` 个字符(上游 `RandText`;池空或 size 为 0 返回 `None`)。
+/// 均匀取 `size` 个字符(池空或 size 为 0 返回 `None`)。
 fn rand_text(size: usize, pool: &str, rng: &mut impl Rng) -> Option<String> {
     let chars: Vec<char> = pool.chars().collect();
     if chars.is_empty() || size == 0 {
@@ -952,9 +946,8 @@ fn rand_text(size: usize, pool: &str, rng: &mut impl Rng) -> Option<String> {
     )
 }
 
-/// 上游 `DriverChinese.GenerateIdQuestionAnswer`:source(即
-/// `language`)按 `,` 切分——单段即字符池;段数不大于长度时回退
-/// 数字字母表;否则逐字随机取段拼接。
+/// 中文字符池生成:`language` 按 `,` 切分——单段即字符池;
+/// 段数不大于长度时回退数字字母表;否则逐字随机取段拼接。
 fn chinese_text(language: &str, count: usize, rng: &mut impl Rng) -> Option<String> {
     let parts: Vec<&str> = language.split(',').collect();
     if parts.len() == 1 {
@@ -966,8 +959,7 @@ fn chinese_text(language: &str, count: usize, rng: &mut impl Rng) -> Option<Stri
     }
 }
 
-/// 上游 `DriverMath.GenerateIdQuestionAnswer`(乘号记作 `x`,
-/// 操作数范围照录)。
+/// 算术题生成(乘号记作 `x`)。
 fn math_question(rng: &mut impl Rng) -> (String, String) {
     match ri_n(rng, 3) {
         0 => {
@@ -985,7 +977,7 @@ fn math_question(rng: &mut impl Rng) -> (String, String) {
     }
 }
 
-/// 随机 ID(上游 `RandomId`:20 字符取自数字+字母表)。
+/// 随机 ID(20 字符取自数字+字母表)。
 fn random_id(rng: &mut impl Rng) -> String {
     (0..20)
         .map(|_| ID_CHARS.as_bytes()[rng.random_range(0..ID_CHARS.len())] as char)
@@ -1037,7 +1029,7 @@ fn font_table() -> &'static HashMap<u32, [u8; 32]> {
     })
 }
 
-/// 汉字判定(上游 `IsChineseChar` 的 BMP 近似;仅影响摆放偏移)。
+/// 汉字判定(BMP 范围近似;仅影响摆放偏移)。
 fn is_han(c: char) -> bool {
     matches!(c, '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}')
 }
@@ -1051,7 +1043,7 @@ fn glyph_dims(c: char, size: i32) -> (i32, i32) {
     }
 }
 
-/// 写像素(越界静默跳过,同 Go `image` 的越界丢弃语义)。
+/// 写像素(越界静默跳过)。
 fn set_px(img: &mut RgbaImage, x: i32, y: i32, color: [u8; 4]) {
     if x < 0 || y < 0 || x >= img.width() as i32 || y >= img.height() as i32 {
         return;
@@ -1060,7 +1052,7 @@ fn set_px(img: &mut RgbaImage, x: i32, y: i32, color: [u8; 4]) {
 }
 
 /// 将缩放后的位图字形写入画布(最近邻采样,仅字形位为 1 的像素;
-/// 越界跳过)。上游以 freetype 渲染 TTF 字体,此处为同构替身。
+/// 越界跳过)。
 fn draw_scaled_glyph(
     dst: &mut RgbaImage,
     ch: char,
@@ -1094,8 +1086,7 @@ fn draw_scaled_glyph(
     }
 }
 
-/// 中点圆填充(上游 `ItemDigit.drawCircle` 与
-/// `palette.DrawCircle` 同式)。
+/// 中点圆填充。
 fn draw_filled_circle(img: &mut RgbaImage, cx: i32, cy: i32, radius: i32, color: [u8; 4]) {
     let mut f = 1 - radius;
     let mut dfx = 1;
@@ -1126,7 +1117,7 @@ fn draw_horiz_line(img: &mut RgbaImage, from_x: i32, to_x: i32, y: i32, color: [
     }
 }
 
-/// 五像素宽 Bresenham 折线(上游 `palette.DrawBeeline` 逐式)。
+/// 五像素宽 Bresenham 折线。
 fn draw_beeline(img: &mut RgbaImage, mut p1: (i32, i32), p2: (i32, i32), color: [u8; 4]) {
     let dx = f64::from(p1.0 - p2.0).abs();
     let dy = f64::from(p2.1 - p1.1).abs();
@@ -1158,8 +1149,8 @@ fn draw_beeline(img: &mut RgbaImage, mut p1: (i32, i32), p2: (i32, i32), color: 
     }
 }
 
-/// 源覆盖合成(对应 Go `draw.Draw(..., Over)`:Porter-Duff over、
-/// 非预乘;源图仅取 `[region]` 区域,两侧越界截断)。
+/// 源覆盖合成(Porter-Duff over、非预乘;源图仅取 `[region]` 区域,
+/// 两侧越界截断)。
 fn composite_over(
     dst: &mut RgbaImage,
     src: &RgbaImage,
@@ -1205,8 +1196,7 @@ fn composite_over(
     }
 }
 
-/// 正弦扭曲(上游 `ItemDigit.distort` 与 `palette.Distort` 同式;
-/// 越界源取画布初始色)。
+/// 正弦扭曲(越界源取画布初始色)。
 fn distort_warp(img: &mut RgbaImage, amp: f64, period: f64, oob: [u8; 4]) {
     let (w, h) = (img.width() as i32, img.height() as i32);
     let dx = 2.0 * PI / period;
@@ -1227,7 +1217,7 @@ fn distort_warp(img: &mut RgbaImage, amp: f64, period: f64, oob: [u8; 4]) {
     }
 }
 
-/// 旋转外接尺寸(上游 `RotatedSize`,含 0.1 舍入分支)。
+/// 旋转外接尺寸(含 0.1 舍入分支)。
 fn rotated_size(w: i32, h: i32, angle_deg: i32) -> (i32, i32) {
     if w <= 0 || h <= 0 {
         return (0, 0);
@@ -1261,8 +1251,7 @@ fn rotated_size(w: i32, h: i32, angle_deg: i32) -> (i32, i32) {
     (width as i32, height as i32)
 }
 
-/// 扩幅旋转(上游 `NRGBA.Rotate(angle, false)` 的等效近似:
-/// 绕中心旋转进外接画布,最近邻采样)。
+/// 扩幅旋转(绕中心旋转进外接画布,最近邻采样)。
 fn rotate_expand(img: &RgbaImage, angle_deg: i32) -> RgbaImage {
     if angle_deg == 0 {
         return img.clone();
@@ -1291,8 +1280,7 @@ fn rotate_expand(img: &RgbaImage, angle_deg: i32) -> RgbaImage {
     out
 }
 
-/// 原幅旋转(上游 `NRGBA.Rotate(angle, true)`(扩幅后居中回裁)
-/// 的等效近似:绕中心逆映射,画布尺寸不变)。
+/// 原幅旋转(绕中心逆映射,画布尺寸不变)。
 fn rotate_inplace(img: &mut RgbaImage, angle_deg: i32) {
     if angle_deg == 0 {
         return;
@@ -1318,7 +1306,7 @@ fn rotate_inplace(img: &mut RgbaImage, angle_deg: i32) {
     }
 }
 
-/// 非透明包围盒 ±2(上游 `CalcMarginBlankArea`),越界截断。
+/// 非透明包围盒 ±2,越界截断。
 fn calc_margin_blank(img: &RgbaImage) -> (i32, i32, i32, i32) {
     let (w, h) = (img.width() as i32, img.height() as i32);
     let mut min_x = w;
@@ -1350,7 +1338,7 @@ fn calc_margin_blank(img: &RgbaImage) -> (i32, i32, i32, i32) {
     (min_x, min_y, max_x - min_x, max_y - min_y)
 }
 
-/// 数字字形位图(11×18),与 dchest/base64Captcha 的 digitFontData 逐字节一致(Apache-2.0)。
+/// 数字字形位图(11×18),与 base64Captcha 的 digitFontData 逐字节一致(Apache-2.0)。
 const DIGIT_FONT: [[u8; 198]; 10] = [
     [
         0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1,
@@ -1444,7 +1432,7 @@ const DIGIT_FONT: [[u8; 198]; 10] = [
     ],
 ];
 
-// 上游常量:ID/字符/噪声表与点选色表(逐字照录)。
+// 内置常量:ID/字符/噪声表与点选色表。
 const TXT_NUMBERS: &str = "012346789";
 const ID_CHARS: &str = "012346789ABCDEFGHJKMNOQRSTUVXYZabcdefghjkmnoqrstuvxyz";
 const NOISE_CHARS: &str = "012346789ABCDEFGHJKMNOQRSTUVXYZabcdefghjkmnoqrstuvxyz,.[]<>";
@@ -1459,8 +1447,8 @@ const CLICK_THUMB_COLORS: [&str; 7] = [
 // 渲染:文本(列布局 + 噪声字符)
 // ---------------------------------------------------------------------------
 
-/// 文本渲染(上游 `ItemChar`:`drawNoise` + `drawText`)。
-/// 背景恒随机浅色、字形恒随机深色(上游 wrapper 未接线颜色配置)。
+/// 文本渲染:先铺随机噪声字符、再写题面字符。
+/// 背景恒随机浅色、字形恒随机深色(配置中的颜色字段为惰性)。
 #[allow(clippy::too_many_arguments)]
 fn gen_text(
     width: i32,
@@ -1505,12 +1493,11 @@ fn gen_text(
 }
 
 // ---------------------------------------------------------------------------
-// 渲染:数字点阵(dchest 系)
+// 渲染:数字点阵
 // ---------------------------------------------------------------------------
 
-/// 数字渲染(上游 `ItemDigit`:`calculateSizes` 摆放、
-/// `drawDigit` 圆填充字形与剪切、`strikeThrough`、`distort`、
-/// `fillWithCircles`;调色板色映射到 RGBA)。
+/// 数字渲染:圆填充字形与逐行剪切、穿透线、正弦扭曲、
+/// 干扰圆填充;调色板色映射到 RGBA。
 fn render_digit(
     cfg: &DigitConfig,
     question: &str,
@@ -1573,7 +1560,7 @@ fn render_digit(
     Ok((id, b64))
 }
 
-/// 上游 `ItemDigit.calculateSizes`。
+/// 计算摆位:边距内的单字宽高与点阵点径。
 fn calc_digit_sizes(w: i32, h: i32, count: i32) -> (i32, i32, i32) {
     let border = if w > h { h / 4 } else { w / 4 };
     let wf = f64::from(w - border * 2);
@@ -1593,8 +1580,7 @@ fn calc_digit_sizes(w: i32, h: i32, count: i32) -> (i32, i32, i32) {
     (nw as i32 - dot_size, nh as i32, dot_size)
 }
 
-/// 上游 `ItemDigit.drawDigit`:逐字形像素画填充圆,
-/// 每行结束累加横向剪切。
+/// 逐字形像素画填充圆,每行结束累加横向剪切。
 #[allow(clippy::too_many_arguments)]
 fn draw_digit(
     img: &mut RgbaImage,
@@ -1622,7 +1608,7 @@ fn draw_digit(
     }
 }
 
-/// 上游 `ItemDigit.strikeThrough`。
+/// 穿透线:沿正弦轨迹以填充圆涂抹横贯线。
 fn strike_through(img: &mut RgbaImage, dot_size: i32, color: [u8; 4], rng: &mut impl Rng) {
     let (w, h) = (img.width() as i32, img.height() as i32);
     let y = ri_range(rng, h / 3, h - h / 3);
@@ -1645,7 +1631,7 @@ fn strike_through(img: &mut RgbaImage, dot_size: i32, color: [u8; 4], rng: &mut 
     }
 }
 
-/// 上游 `ItemDigit.fillWithCircles`。
+/// 干扰圆填充:从调色板取色随机画圆。
 fn fill_with_circles(
     img: &mut RgbaImage,
     n: i32,
@@ -1674,7 +1660,7 @@ fn fill_with_circles(
 // 渲染:点选
 // ---------------------------------------------------------------------------
 
-/// 主图点位(上游 `click.Dot` 的生成侧子集)。
+/// 主图点位(生成侧内部结构)。
 struct ClickDotRaw {
     char: char,
     x: i32,
@@ -1687,8 +1673,7 @@ struct ClickDotRaw {
     color2: String,
 }
 
-/// 角度采样(上游 `randAngle`:默认六段区间取一,
-/// 段内闭区间均匀)。
+/// 角度采样(六段区间取一,段内闭区间均匀)。
 fn click_angle(rng: &mut impl Rng) -> i32 {
     const RANGES: [(i32, i32); 6] = [
         (20, 35),
@@ -1702,8 +1687,8 @@ fn click_angle(rng: &mut impl Rng) -> i32 {
     ri_fast(rng, lo, hi)
 }
 
-/// 主图点位采样(上游 `genDots` 的主图分支,padding=10;
-/// 列分布 + 列内抖动 + 双侧截断,记录 Y 为 `y - size`)。
+/// 主图点位采样(padding=10;列分布 + 列内抖动 + 双侧截断,
+/// 记录 Y 为 `y - size`)。
 fn click_master_dots(cfg: &ClickConfig, chars: &[char], rng: &mut impl Rng) -> Vec<ClickDotRaw> {
     let count = chars.len() as i32;
     let padding = 10i32;
@@ -1734,9 +1719,8 @@ fn click_master_dots(cfg: &ClickConfig, chars: &[char], rng: &mut impl Rng) -> V
         .collect()
 }
 
-/// 主图字符管线(上游 `DrawDotImage`:阴影按配置偏移先行、
-/// 主字形随后,整幅扩幅旋转,非空包围盒回写点位宽高,
-/// 覆盖合成到主图)。
+/// 主图字符管线:阴影按配置偏移先行、主字形随后,整幅扩幅旋转,
+/// 非空包围盒回写点位宽高,覆盖合成到主图。
 fn click_draw_glyph(master: &mut RgbaImage, dot: &mut ClickDotRaw, cfg: &ClickConfig) {
     let size = dot.size;
     let (gw, gh) = glyph_dims(dot.char, size);
@@ -1774,8 +1758,7 @@ fn click_draw_glyph(master: &mut RgbaImage, dot: &mut ClickDotRaw, cfg: &ClickCo
     dot.height = region.3;
 }
 
-/// 渐变背景(上游 `loadDefaultBackground` 公式 + `RangCutImagePos`
-/// 的随机裁剪粘贴;背景恒 300×220,目标更小时随机偏移裁剪)。
+/// 渐变背景(公式生成 300×220 底图,目标更小时随机偏移裁剪粘贴)。
 fn paste_gradient(rng: &mut impl Rng, dst: &mut RgbaImage) {
     let (tw, th) = (dst.width() as i32, dst.height() as i32);
     let mut cur_x = 0;
@@ -1800,13 +1783,13 @@ fn gradient_px(x: i32, y: i32) -> [u8; 4] {
     [(100 + x % 50) as u8, (150 + y % 50) as u8, 200, 255]
 }
 
-/// 缩略图(上游 `genThumbImage` + `DrawWithPalette`:
-/// 干扰圆、五像素折线、单元格字符、正弦扭曲;色表为上游默认深色系)。
+/// 缩略图:干扰圆、五像素折线、单元格字符、正弦扭曲;
+/// 色表为内置深色系。
 fn click_thumb(cfg: &ClickConfig, chars: &[char], rng: &mut impl Rng) -> RgbaImage {
     let mut img =
         RgbaImage::from_pixel(cfg.thumb_width, cfg.thumb_height, Rgba([255, 255, 255, 0]));
     let (w, h) = (img.width() as i32, img.height() as i32);
-    // 干扰圆(上游 thumbBgCirclesNum=24、半径 1)
+    // 干扰圆(24 个、半径 1)
     for _ in 0..24 {
         let color = parse_hex_color(pick(rng, &CLICK_THUMB_COLORS));
         let r = ri_fast(rng, 1, 1);
@@ -1818,7 +1801,7 @@ fn click_thumb(cfg: &ClickConfig, chars: &[char], rng: &mut impl Rng) -> RgbaIma
             color,
         );
     }
-    // 折线(上游 thumbBgSlimLineNum=2 的奇偶分支逐式)
+    // 折线(2 条,奇偶分支)
     let first = w / 10;
     let end = first * 9;
     let y = h / 3;
@@ -1845,7 +1828,7 @@ fn click_thumb(cfg: &ClickConfig, chars: &[char], rng: &mut impl Rng) -> RgbaIma
         let (gw, gh) = glyph_dims(*ch, size);
         draw_scaled_glyph(&mut img, *ch, dx, dy - gh, gw, gh, color);
     }
-    // 扭曲(上游 thumbBgDistort=DistortLevel4 → 周期 100..160)
+    // 扭曲(周期 100..160)
     distort_warp(
         &mut img,
         f64::from(ri_fast(rng, 5, 10)),
@@ -1855,10 +1838,8 @@ fn click_thumb(cfg: &ClickConfig, chars: &[char], rng: &mut impl Rng) -> RgbaIma
     img
 }
 
-/// 点选驱动(上游 `generateClick`):主图 JPEG、缩略图 PNG,
-/// 点位元数据与期望答案的 JSON 字段与上游一致。
-/// 期望答案存为数组(上游为 map 序列化、其自身按数组解析恒失败,
-/// 此处修正为可用,数据同源)。
+/// 点选驱动:主图 JPEG、缩略图 PNG,点位元数据与期望答案同源。
+/// 期望答案按数组存储,使逐点 ±10px 的验证语义可用。
 fn gen_click(cfg: &ClickConfig, rng: &mut impl Rng) -> Result<(String, String, String), String> {
     let chars_src = if cfg.chars.is_empty() {
         "这的是随了机文我你他字在有不么中"
@@ -1870,12 +1851,12 @@ fn gen_click(cfg: &ClickConfig, rng: &mut impl Rng) -> Result<(String, String, S
     if count <= 0 || pool.len() < count as usize {
         return Err("character length must be greater than rangeLen.Max".into());
     }
-    // 无重复采样(上游 genRandChar 的不重复子序列)
+    // 无重复采样(洗牌后截取前 count 个)
     let mut chars = pool;
     chars.shuffle(rng);
     chars.truncate(count as usize);
     let mut master_dots = click_master_dots(cfg, &chars, rng);
-    // 选出待验证点位(上游 rangeCheckDots:重排 + 重编号)
+    // 选出待验证点位(重排 + 重编号)
     let mut perm: Vec<usize> = (0..chars.len()).collect();
     perm.shuffle(rng);
     let verify: Vec<usize> = perm.into_iter().take(cfg.verify_count).collect();
@@ -1934,8 +1915,8 @@ fn gen_click(cfg: &ClickConfig, rng: &mut impl Rng) -> Result<(String, String, S
 // 渲染:滑块
 // ---------------------------------------------------------------------------
 
-/// 圆角矩形掩码(本库替身管线的缺口与滑块形状;`jigsaw_radius`
-/// 等其余滑块配置字段与上游一致为惰性)。
+/// 圆角矩形掩码(滑块缺口与滑块图的形状;`jigsaw_radius`
+/// 等其余滑块配置字段为惰性)。
 fn in_rounded_rect(px: i32, py: i32, w: i32, h: i32, radius: i32) -> bool {
     if px < 0 || py < 0 || px >= w || py >= h {
         return false;
@@ -1948,12 +1929,9 @@ fn in_rounded_rect(px: i32, py: i32, w: i32, h: i32, radius: i32) -> bool {
     dx * dx + dy * dy <= r * r
 }
 
-/// 滑块驱动(上游 `generateSlide`):缺口位置采样为上游
-/// `genGraphBlocks` 的 ModeBasic/Left 分支逐式(单一图块、
-/// `genGraphNumber=1`、左死区),Y 为 [5, H-c-5] 闭区间。
-/// 上游因图形资源未接而不可生成;本库以同构管线实现:
-/// 渐变背景,缺口区域经圆角掩码提取为滑块图、主图对应区域
-/// 亮度乘 0.45。
+/// 滑块驱动:单一图块、左侧留死区,缺口位置 Y 为 [5, H-c-5]
+/// 闭区间;渐变背景,缺口区域经圆角掩码提取为滑块图、
+/// 主图对应区域亮度乘 0.45。
 fn gen_slide(cfg: &SlideConfig, rng: &mut impl Rng) -> Result<(String, String, String), String> {
     let c_w = ri_fast(rng, cfg.tile_width as i32, cfg.tile_width as i32);
     let dp = c_w / 2;
@@ -2004,11 +1982,10 @@ fn gen_slide(cfg: &SlideConfig, rng: &mut impl Rng) -> Result<(String, String, S
 // 渲染:旋转
 // ---------------------------------------------------------------------------
 
-/// 旋转驱动(上游 `generateRotate`):上游 builder 不读 wrapper
-/// 配置,恒取上游默认——主图 220×220、缩略边长 {140,150,160,170}
-/// 中随机、角度 [30,330] 闭区间。圆盘为径向图案替身(上游为
-/// 随机图片的圆形裁剪);主图即圆盘未旋转,缩略图为中心裁剪 +
-/// 内切圆掩码后旋转。
+/// 旋转驱动:主图 220×220、缩略边长 {140,150,160,170}
+/// 中随机、角度 [30,330] 闭区间(内置常量,`RotateConfig`
+/// 字段为惰性)。圆盘为程序生成的径向图案;主图即圆盘未旋转,
+/// 缩略图为中心裁剪 + 内切圆掩码后旋转。
 fn gen_rotate(rng: &mut impl Rng) -> Result<(String, String, String), String> {
     const SIZE: i32 = 220;
     let thumb_size = pick(rng, &[140i32, 150, 160, 170]);
@@ -2079,7 +2056,7 @@ fn png_data_uri(img: &RgbaImage) -> Result<String, String> {
     ))
 }
 
-/// JPEG(上游 QualityNone=100;JPEG 无 alpha,同上游编码时丢弃)。
+/// JPEG(质量 100;JPEG 无 alpha,编码时丢弃)。
 fn jpeg_data_uri(img: &RgbaImage) -> Result<String, String> {
     let (w, h) = (img.width(), img.height());
     let mut rgb = RgbImage::new(w, h);
@@ -2167,7 +2144,7 @@ mod tests {
     fn digit_roundtrip() {
         let cap = Captcha::with_config(Config::with_driver(DriverKind::Digit));
         let (id, b64, answer) = cap.generate().unwrap();
-        assert_eq!(id.len(), 20); // 上游 RandomId:20 字符取自数字+字母表
+        assert_eq!(id.len(), 20); // 随机 ID:20 字符取自数字+字母表
         assert!(id.chars().all(|c| ID_CHARS.contains(c)));
         assert_eq!(answer.len(), 4);
         assert!(answer.chars().all(|c| c.is_ascii_digit()));
@@ -2190,7 +2167,7 @@ mod tests {
         // 错误答案不删除
         assert!(!cap.verify(&id, "!!!!").unwrap());
         assert!(cap.exists(&id).unwrap());
-        // 与上游一致为精确比较:带空白不匹配
+        // 精确比较:带空白不匹配
         assert!(!cap.verify(&id, &format!(" {answer} ")).unwrap());
         assert!(cap.exists(&id).unwrap());
         // 不存在的条目
@@ -2218,7 +2195,7 @@ mod tests {
         assert_eq!(decode_img(&b64).dimensions(), (240, 80));
     }
 
-    /// 上游语义:`Chinese` 驱动字符池取 `language`(默认 "zh")。
+    /// `Chinese` 驱动字符池取 `language`(默认 "zh")。
     #[test]
     fn chinese_default_pool() {
         let cap = Captcha::with_config(Config::with_driver(DriverKind::Chinese));
@@ -2228,7 +2205,7 @@ mod tests {
         assert_eq!(decode_img(&b64).dimensions(), (240, 80));
     }
 
-    /// 上游语义:逗号切分多于长度时逐字随机取段(词表模式)。
+    /// 逗号切分段数多于长度时逐字随机取段(词表模式)。
     #[test]
     fn chinese_word_list() {
         let cap = Captcha::with_config(Config {
@@ -2245,7 +2222,7 @@ mod tests {
             .all(|c| "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳".contains(c)));
     }
 
-    /// 上游语义:段数不大于长度时回退数字字母表。
+    /// 段数不大于长度时回退数字字母表。
     #[test]
     fn chinese_fallback_pool() {
         let cap = Captcha::with_config(Config {
@@ -2294,9 +2271,9 @@ mod tests {
         assert_eq!(answer.chars().count(), 10);
     }
 
-    /// 默认值与上游 `DefaultConfig` 逐项一致(含惰性字段)。
+    /// 默认配置逐项断言(含惰性字段)。
     #[test]
-    fn defaults_match_upstream() {
+    fn default_config_values() {
         let cfg = Captcha::new().get_config();
         assert_eq!(cfg.driver(), DriverKind::Digit);
         assert_eq!(cfg.expire(), Duration::from_secs(300));
@@ -2354,7 +2331,7 @@ mod tests {
         assert_eq!((c.shadow_offset_x, c.shadow_offset_y), (2, 2));
         assert_eq!(c.chars, "这的是随了机文我你他字在有不么中");
         assert_eq!(c.language, "zh");
-        let r = RotateConfig::default(); // 上游 builder 不读该配置,字段惰性
+        let r = RotateConfig::default(); // 旋转驱动不读该配置,字段惰性
         assert_eq!(
             (
                 r.master_width,
@@ -2372,7 +2349,7 @@ mod tests {
     fn slide_shape_and_tolerance() {
         let cap = Captcha::with_config(Config::with_driver(DriverKind::Slide));
         let (id, b64, answer) = cap.generate().unwrap();
-        // ID 形如 "{x}_{y}",坐标落在上游采样域内
+        // ID 形如 "{x}_{y}",坐标落在采样域内
         let (x, y) = id.split_once('_').unwrap();
         let (x, y): (i32, i32) = (x.parse().unwrap(), y.parse().unwrap());
         assert!((85..=240).contains(&x));
@@ -2410,7 +2387,7 @@ mod tests {
         assert_eq!(data.id, id);
         assert_eq!(data.dots.len(), 3);
         for d in data.dots.values() {
-            assert!(d.char.is_empty()); // 上游输出恒空
+            assert!(d.char.is_empty()); // 输出恒空
         }
         let exp: Vec<ExpectedClickDot> = serde_json::from_str(&answer).unwrap();
         assert_eq!(exp.len(), 3);
@@ -2429,7 +2406,7 @@ mod tests {
         for e in &exp {
             assert_eq!(e.shape, "");
             assert_eq!(e.text.chars().count(), 1);
-            assert!((10..=260).contains(&e.x)); // 上游列分布 + 截断
+            assert!((10..=260).contains(&e.x)); // 列分布 + 截断
             assert!(e.y >= 10);
             assert!(e.angle >= 20 && (e.angle <= 60 || (290..=330).contains(&e.angle)));
             assert!(e.width > 0 && e.height > 0);
@@ -2472,14 +2449,14 @@ mod tests {
         assert!(id.starts_with("rotate_"));
         let data: RotateCaptchaData = serde_json::from_str(&b64).unwrap();
         assert_eq!(data.id, id);
-        assert!((30..=330).contains(&data.angle)); // 上游默认采样域
+        assert!((30..=330).contains(&data.angle)); // 默认采样域 [30,330]
         assert_eq!(answer, data.angle.to_string());
         assert!(data.master_image.starts_with("data:image/png;base64,"));
         assert!(data.thumb_image.starts_with("data:image/png;base64,"));
         assert_eq!(decode_img(&data.master_image).dimensions(), (220, 220));
         let (tw, th) = decode_img(&data.thumb_image).dimensions();
         assert_eq!(tw, th);
-        assert!(matches!(tw, 140 | 150 | 160 | 170)); // 上游默认集合
+        assert!(matches!(tw, 140 | 150 | 160 | 170)); // 默认边长集合
         let angle = data.angle;
         // 容差 ±5(线性侧)
         assert!(cap.verify_keep(&id, &angle.to_string()).unwrap());
@@ -2498,9 +2475,9 @@ mod tests {
 
     // ---------- 输入解析与字体资产 ----------
 
-    /// `Sscanf("%d")` 语义:前导空白、符号、最长数字前缀、溢出失败。
+    /// 前导十进制整数解析:前导空白、符号、最长数字前缀、溢出失败。
     #[test]
-    fn sscanf_semantics() {
+    fn int_prefix_semantics() {
         assert_eq!(parse_int_prefix("12"), Some(12));
         assert_eq!(parse_int_prefix("12abc"), Some(12));
         assert_eq!(parse_int_prefix("  12"), Some(12));

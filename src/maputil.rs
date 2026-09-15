@@ -1,6 +1,6 @@
-//! 映射表辅助函数(移植自 go-utils/maputils)。
+//! 映射表辅助函数。
 //!
-//! 键/值遍历 Rust 迭代器原生覆盖,这里保留 Go 版的核心集合操作。
+//! 键/值遍历 Rust 迭代器原生覆盖,这里补充常用的集合级操作。
 
 use std::collections::HashMap;
 use std::hash::Hash;

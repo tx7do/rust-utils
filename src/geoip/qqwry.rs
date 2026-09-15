@@ -1,4 +1,4 @@
-//! 纯真 qqwry.dat 读取器(对应 Go 版 `geoip/qqwry`,feature `geoip`)。
+//! 纯真 qqwry.dat 读取器(feature `geoip`)。
 //!
 //! 数据格式:文件头两个 LE u32 给出索引区起止偏移(止偏移指向
 //! 最后一条索引条目);索引条目 7 字节(LE u32 起始 IP + LE u24
@@ -7,44 +7,38 @@
 //! [0x01|0x02][LE u24] 重定向标记(记录级国家字段另有 0x01 双重
 //! 重定向形态)。
 //!
-//! 与上游的差异:
+//! 行为说明:
 //!
-//! - 数据文件不由库内嵌(Go 版 `go:embed` 了 10 MB 的 qqwry.dat),
-//!   构造函数改为接收字节序列;
-//! - 越界读取由 Go 的切片 panic 改为返回零偏移/空串;
-//! - 上游 `Query` 定位运营商字段时以 `len(area)` 推进——引用了
-//!   尚未赋值的变量,恒为 0,属上游笔误,此处按读出的国家串长度
-//!   推进;
+//! - 数据文件不由库内嵌,构造函数接收字节序列,由调用方自行加载;
+//! - 越界读取返回零偏移/空串,不 panic;
+//! - 运营商字段的位置按读出的国家串长度推进;
 //! - 索引二分对单条目(startPos==endPos)与区间未按 7 字节对齐的
-//!   文件,上游在未命中条目起始 IP 时死循环,此处按未找到返回
-//!   (命中条目起始 IP 的返回保持原行为;低于首条目起始 IP 的
-//!   查询上游按二分收敛返回首条记录,同样保持原行为);
-//! - `SpiltAddress` 的 Go 正则以字面交替匹配等价实现(含 `.`
-//!   不匹配换行的语义);
-//! - 未移植:`ipCache`(查询路径未使用的死字段)、`readArea`
-//!   (未被调用的死函数)。
+//!   文件,未命中条目起始 IP 时按未找到返回,不死循环;命中条目
+//!   起始 IP 时返回其记录,低于首条目起始 IP 的查询按二分收敛
+//!   返回首条记录;
+//! - 地址省/市切分基于终止符字面匹配实现,见 [`spilt_address`]。
 
 use crate::geoip::{net_matches_prefix, parse_ip_bytes, GeoResult};
 use std::net::{IpAddr, Ipv4Addr};
 
-/// 索引条目长度(上游 `ipRecordLength`)。
+/// 索引条目长度。
 const IP_RECORD_LENGTH: u32 = 7;
 
-/// 重定向标记(上游 `redirectMode1`/`redirectMode2`)。
+/// 重定向标记。
 const REDIRECT_MODE1: u8 = 0x01;
 const REDIRECT_MODE2: u8 = 0x02;
 
-/// qqwry 客户端(上游 `qqwry.Client`)。
+/// qqwry 客户端。
 pub struct Client {
     data: Vec<u8>,
     start_pos: u32,
     end_pos: u32,
-    /// 索引条目数(上游 `IPNum` 的公式,区间倒挂时按无符号回绕)。
+    /// 索引条目数(区间倒挂时按无符号回绕)。
     pub ip_num: i64,
 }
 
 impl Client {
-    /// 从 qqwry.dat 字节序列创建(Go 版 `NewClient` 读内嵌数据)。
+    /// 从 qqwry.dat 字节序列创建。
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, String> {
         if data.len() < 8 {
             return Err("qqwry: invalid data file".to_string());
@@ -60,9 +54,9 @@ impl Client {
         })
     }
 
-    /// 归属地查询(上游 `Client.Query`)。
+    /// 归属地查询。
     pub fn query(&self, query_ip: &str) -> Result<GeoResult, String> {
-        // 上游:IP 与国家字段无条件先行赋值
+        // IP 与国家字段无条件先行赋值
         let mut res = GeoResult {
             ip: query_ip.to_string(),
             country: "中国".to_string(),
@@ -71,7 +65,7 @@ impl Client {
 
         let ip32 = parse_ip(query_ip)?;
         if is_private_ip(query_ip) {
-            // 上游:内网 IP 的省/市置"局域网"并提前返回
+            // 内网 IP 的省/市置"局域网"并提前返回
             res.province = "局域网".to_string();
             res.city = "局域网".to_string();
             return Ok(res);
@@ -105,7 +99,7 @@ impl Client {
         if let Some(isp_bytes) = self.isp_field(isp_pos) {
             let isp = gb18030_decode(&isp_bytes).trim().to_string();
             if !isp.is_empty() {
-                // 上游:CZ88.NET 占位串清空
+                // CZ88.NET 占位串清空
                 res.isp = if isp.contains("CZ88.NET") {
                     String::new()
                 } else {
@@ -117,8 +111,8 @@ impl Client {
         Ok(res)
     }
 
-    /// 读一条索引条目(上游 `readIpRecord`:起始 IP LE u32 +
-    /// 记录偏移 LE u24;越界返回零,对应上游切片 panic)。
+    /// 读一条索引条目(起始 IP LE u32 +
+    /// 记录偏移 LE u24;越界返回零)。
     fn locate_read(&self, offset: u32) -> (u32, u32) {
         let end = offset.wrapping_add(IP_RECORD_LENGTH) as usize;
         let Some(b) = self.data.get(offset as usize..end) else {
@@ -129,16 +123,16 @@ impl Client {
         (ip, rec)
     }
 
-    /// 索引二分定位(上游 `locateIP`)。返回记录偏移,0 表示未找到。
-    /// 死循环修正的说明见模块文档。
+    /// 索引二分定位。返回记录偏移,0 表示未找到。
+    /// 退化与未对齐区间的行为见模块文档。
     fn locate_ip(&self, ip: u32) -> u32 {
         let mut i = self.start_pos;
         let mut j = self.end_pos;
         let mut offset = 0u32;
         loop {
             if j <= i {
-                // 退化区间(单条目或区间倒挂):上游死循环,
-                // 命中该条目起始 IP 时仍返回其记录
+                // 退化区间(单条目或区间倒挂):
+                // 仅命中该条目起始 IP 时返回其记录
                 let (start_ip, rec) = self.locate_read(i);
                 if start_ip == ip {
                     offset = rec;
@@ -161,7 +155,7 @@ impl Client {
             let mid =
                 i.wrapping_add(((j.wrapping_sub(i) / IP_RECORD_LENGTH) >> 1) * IP_RECORD_LENGTH);
             if mid <= i || mid >= j {
-                // 区间未按条目对齐:上游死循环,同上处理
+                // 区间未按条目对齐:同上,仅等值命中时返回
                 let (start_ip, rec) = self.locate_read(i);
                 if start_ip == ip {
                     offset = rec;
@@ -181,7 +175,7 @@ impl Client {
         offset
     }
 
-    /// 读 NUL 结尾串(上游 `readString`:无 NUL 或越界返回空)。
+    /// 读 NUL 结尾串(无 NUL 或越界返回空)。
     fn read_string(&self, offset: u32) -> Vec<u8> {
         let mut out = Vec::new();
         let mut i = offset as usize;
@@ -195,7 +189,7 @@ impl Client {
         out
     }
 
-    /// 读 LE u24(上游 `readUInt24`:越界返回 0)。
+    /// 读 LE u24(越界返回 0)。
     fn read_u24(&self, offset: u32) -> u32 {
         let end = offset.wrapping_add(3) as usize;
         let Some(b) = self.data.get(offset as usize..end) else {
@@ -204,10 +198,10 @@ impl Client {
         u32::from(b[0]) | (u32::from(b[1]) << 8) | (u32::from(b[2]) << 16)
     }
 
-    /// 国家字段(上游 `Query` 的字段模式 switch):返回
+    /// 国家字段:返回
     /// (国家串字节, 运营商字段位置)。0x01/0x02 为重定向标记,
     /// 其余为首字节即串首字符的内联形态。内联形态的推进长度按
-    /// 读出的国家串长度(上游引用未赋值变量的笔误,见模块文档)。
+    /// 读出的国家串长度(见模块文档)。
     fn read_country_field(&self, offset: u32) -> (Vec<u8>, u32) {
         let mode = self.data.get(offset as usize).copied().unwrap_or(0);
         match mode {
@@ -237,8 +231,8 @@ impl Client {
         }
     }
 
-    /// 运营商字段(上游 `Query` 尾段):重定向标记后跟 LE u24,
-    /// 否则内联;重定向解析为 0 时上游不读取。
+    /// 运营商字段:重定向标记后跟 LE u24,
+    /// 否则内联;重定向解析为 0 时不读取。
     fn isp_field(&self, mut isp_pos: u32) -> Option<Vec<u8>> {
         let mode = self.data.get(isp_pos as usize).copied().unwrap_or(0);
         if mode == REDIRECT_MODE1 || mode == REDIRECT_MODE2 {
@@ -251,8 +245,8 @@ impl Client {
     }
 }
 
-/// 解析 IPv4 为大端 u32(上游 `parseIp`:IPv4 映射形态按上游
-/// `To4` 折叠,其余一律按非 IPv4 拒绝)。
+/// 解析 IPv4 为大端 u32(IPv4 映射形态折叠为 4 字节,
+/// 其余一律按非 IPv4 拒绝)。
 fn parse_ip(query_ip: &str) -> Result<u32, String> {
     let bytes = parse_ip_bytes(query_ip).ok_or("ip is not ipv4")?;
     if bytes.len() != 4 {
@@ -261,7 +255,7 @@ fn parse_ip(query_ip: &str) -> Result<u32, String> {
     Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
-/// 内网判定(上游 `qqwry.IsPrivateIP`:解析失败或含 `:` 视为
+/// 内网判定(解析失败或含 `:` 视为
 /// 内网,随后检查 IPv4 内网段)。
 fn is_private_ip(ip_str: &str) -> bool {
     if ip_str.contains(':') {
@@ -284,17 +278,16 @@ fn is_private_ip(ip_str: &str) -> bool {
     false
 }
 
-/// GB18030 解码(上游 `gb18030Decode`,替换语义)。
+/// GB18030 解码(非法字节按替换字符处理)。
 fn gb18030_decode(src: &[u8]) -> String {
     let (cow, _, _) = encoding_rs::GB18030.decode(src);
     cow.into_owned()
 }
 
-/// 地址省/市切分(上游 `SpiltAddress`:正则
-/// `.+?(省|市|自治区|自治州|盟|县|区|管委会|街道|镇|乡)` 的
-/// `FindAllString` 语义的等价实现——自每个起点先消耗一个以上
-/// 非换行字符,再按各终止符的最左出现截取;`.` 不匹配换行,
-/// 命中后从匹配末尾继续扫描)。
+/// 地址省/市切分:自每个起点先消耗一个以上非换行字符,再按各
+/// 终止符(省/市/自治区/自治州/盟/县/区/管委会/街道/镇/乡)的
+/// 最左出现截取;换行阻断其所在起点的匹配,命中后从匹配末尾
+/// 继续扫描。
 fn spilt_address(addr: &str) -> Vec<String> {
     const TERMINATORS: [&str; 11] = [
         "省",
@@ -385,7 +378,7 @@ mod tests {
         buf.push(0);
     }
 
-    /// 追加一个内联形态的内层 blob(上游 mode1 重定向的目标布局,
+    /// 追加一个内联形态的内层 blob(mode1 重定向的目标布局,
     /// 无记录体的结束 IP 哨兵):[国家 GB18030][0x00][运营商][0x00]。
     fn put_inline_blob(buf: &mut Vec<u8>, country: &[u8], isp: &[u8]) {
         buf.extend_from_slice(country);
@@ -453,8 +446,8 @@ mod tests {
         buf
     }
 
-    /// 单条目夹具:startPos==endPos(上游对未命中条目起始 IP 的
-    /// 查询死循环,命中时经等值分支返回记录)。
+    /// 单条目夹具:startPos==endPos(仅命中条目起始 IP 的查询
+    /// 返回记录)。
     fn build_single_entry_fixture() -> Vec<u8> {
         let mut buf: Vec<u8> = vec![0u8; 8 + 7];
         put_inline_record(&mut buf, &gbk("浙江省杭州市"), b"ISP-A");
@@ -465,7 +458,8 @@ mod tests {
         buf
     }
 
-    /// 未对齐夹具:索引区差值(10 字节)非 7 的倍数(上游死循环)。
+    /// 未对齐夹具:索引区差值(10 字节)非 7 的倍数(未命中一律
+    /// 按未找到返回)。
     fn build_misaligned_fixture() -> Vec<u8> {
         let mut buf: Vec<u8> = vec![0u8; 8 + 7 * 2];
         put_inline_record(&mut buf, &gbk("浙江省杭州市"), b"ISP-A");
@@ -490,7 +484,7 @@ mod tests {
             assert_eq!(r.city, "杭州市", "{ip}");
             assert_eq!(r.isp, "ISP-A", "{ip}");
         }
-        // 低于首条目起始 IP:上游二分收敛后返回首条记录,保持原行为
+        // 低于首条目起始 IP:二分收敛后返回首条记录
         let r = client.query("0.9.9.9").unwrap();
         assert_eq!(r.province, "浙江省");
         assert_eq!(r.city, "杭州市");
@@ -510,7 +504,7 @@ mod tests {
         assert_eq!(r.province, "浙江省");
         assert_eq!(r.city, "杭州市");
         assert_eq!(r.isp, "ISP-B");
-        // Z:mode1 → 内联内层;运营商位置按国家串长度推进(上游笔误的修正)
+        // Z:mode1 → 内联内层;运营商位置按国家串长度推进
         let r = client.query("210.0.0.5").unwrap();
         assert_eq!(r.province, "丙丙省");
         assert_eq!(r.city, "丁丁市");
@@ -538,7 +532,7 @@ mod tests {
     #[test]
     fn qqwry_private_short_circuit() {
         let client = Client::from_bytes(build_fixture()).unwrap();
-        // 上游:内网段命中,或含 ":"(映射形态折叠为 4 字节后仍短路)
+        // 内网段命中,或含 ":"(映射形态折叠为 4 字节后仍短路)
         for ip in [
             "192.168.1.1",
             "10.0.0.1",
@@ -583,7 +577,7 @@ mod tests {
     #[test]
     fn qqwry_invalid_data() {
         assert!(Client::from_bytes(vec![1, 2, 3]).is_err());
-        // 全零头:零距区间,条目数按上游公式为 1,任何查询未找到
+        // 全零头:零距区间,条目数为 1,任何查询未找到
         let client = Client::from_bytes(vec![0u8; 16]).unwrap();
         assert_eq!(client.ip_num, 1);
         assert_eq!(client.query("1.2.3.4").unwrap_err(), "ip not found");
@@ -594,12 +588,12 @@ mod tests {
     fn qqwry_single_entry_fixture() {
         let client = Client::from_bytes(build_single_entry_fixture()).unwrap();
         assert_eq!(client.ip_num, 1);
-        // 命中唯一条目的起始 IP:上游等值分支返回其记录
+        // 命中唯一条目的起始 IP:等值命中返回其记录
         let r = client.query("5.5.5.5").unwrap();
         assert_eq!(r.province, "浙江省");
         assert_eq!(r.city, "杭州市");
         assert_eq!(r.isp, "ISP-A");
-        // 其余查询:上游死循环,此处按未找到返回
+        // 其余查询:按未找到返回
         for ip in ["5.5.5.6", "9.9.9.9", "1.2.3.4", "0.0.0.0"] {
             assert_eq!(client.query(ip).unwrap_err(), "ip not found", "{ip}");
         }
@@ -608,17 +602,17 @@ mod tests {
     #[test]
     fn qqwry_misaligned_fixture() {
         let client = Client::from_bytes(build_misaligned_fixture()).unwrap();
-        // 首条目起始 IP 的等值命中:上游仍返回其记录
+        // 首条目起始 IP 的等值命中:返回其记录
         let r = client.query("1.0.0.1").unwrap();
         assert_eq!(r.province, "浙江省");
         assert_eq!(r.city, "杭州市");
-        // 未命中的查询:上游死循环,此处按未找到返回
+        // 未命中的查询:按未找到返回
         assert_eq!(client.query("1.0.0.5").unwrap_err(), "ip not found");
     }
 
     #[test]
     fn spilt_address_unit() {
-        // 上游正则语义:懒惰前缀 + 首个终止符,`.` 不匹配换行
+        // 懒惰前缀 + 首个终止符,换行阻断所在起点的匹配
         assert_eq!(
             spilt_address("浙江省杭州市西湖区"),
             vec!["浙江省", "杭州市", "西湖区"]

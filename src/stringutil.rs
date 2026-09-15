@@ -1,12 +1,8 @@
-//! 字符串辅助工具(移植自 go-utils/stringutil 的常用部分)。
+//! 字符串辅助工具。
 //!
-//! Go 版 60 余个 `IntToString` / `StringToInt...OrDefault` 逐类型转换
-//! 函数,在 Rust 里对应 `to_string()` 与 [`parse_or`] 一个泛型函数;
-//! commons-lang 风格的随机串生成器已合并进 `random` 模块
-//! (feature `rand`)。这里保留:
-//!
-//! - [`parse_or`] / [`parse_bool`]:带默认值的容错解析;
-//! - [`replace_json_field`]:原始 JSON 字符串的字段值重写(正则语义移植)。
+//! - [`parse_or`] / [`parse_bool`]:带默认值的宽松数值/布尔解析
+//!   (随机串生成器见 `random` 模块,feature `rand`);
+//! - [`replace_json_field`]:原始 JSON 字符串的字段值重写。
 //!
 //! ```
 //! use rust_utils::stringutil;
@@ -22,7 +18,7 @@
 
 use std::str::FromStr;
 
-/// 解析失败时返回默认值(等价 Go 版 `StringTo...OrDefault` 函数族)。
+/// 解析失败时返回默认值。
 ///
 /// ```
 /// use rust_utils::stringutil::parse_or;
@@ -33,7 +29,7 @@ pub fn parse_or<T: FromStr>(s: &str, default: T) -> T {
     s.trim().parse().unwrap_or(default)
 }
 
-/// 宽松布尔解析(等价 Go `strconv.ParseBool`):
+/// 宽松布尔解析:
 /// `1/t/T/true/TRUE/True` 为真,`0/f/F/false/FALSE/False` 为假,其余 `None`。
 pub fn parse_bool(s: &str) -> Option<bool> {
     match s {
@@ -43,14 +39,12 @@ pub fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
-/// 在原始 JSON 字符串中把指定字符串字段的值替换为 `new_value`
-/// (移植自 Go 版 `ReplaceJSONField`)。
+/// 在原始 JSON 字符串中把指定字符串字段的值替换为 `new_value`。
 ///
 /// - `field_names`:多个字段名用竖线分隔(如 `"tenantId|tenant_id"`),
 ///   大小写不敏感;
-/// - 只匹配值为**字符串**的字段(与 Go 版正则 `"([^"]*)"` 语义一致,
-///   不处理转义引号);
-/// - 替换后冒号后统一为一个空格(Go 版 `${1}: "new"` 语义)。
+/// - 只匹配值为**字符串**的字段(不处理转义引号);
+/// - 替换后冒号后统一为一个空格。
 ///
 /// ```
 /// use rust_utils::stringutil::replace_json_field;

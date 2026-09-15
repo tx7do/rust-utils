@@ -1,4 +1,4 @@
-//! MySQL `CREATE TABLE` DDL 解析器(移植自 go-utils/ddl_parser)。
+//! MySQL `CREATE TABLE` DDL 解析器。
 //!
 //! 手写的分词/解析,不依赖任何 SQL 解析库。能提取表名、列定义
 //! (类型、可空性、主键、默认值、注释、自增、唯一)以及表级属性
@@ -102,9 +102,6 @@ fn remove_block_comments(sql: &str) -> String {
 }
 
 /// 移除 `-- ...` 行注释(到行尾)。
-///
-/// 注:Go 版正则 `--.*?$` 未开多行模式,只能删掉末尾一行的注释,
-/// 这里修正为标准的"删到行尾"语义。
 fn remove_line_comments(sql: &str) -> String {
     let mut out = String::with_capacity(sql.len());
     for line in sql.split('\n') {
@@ -791,7 +788,7 @@ mod tests {
         let table = parse_create_table(sql).unwrap();
         assert_eq!(table.columns[0].default, "");
         assert_eq!(table.columns[1].default, "30");
-        assert_eq!(table.columns[2].default, "'unknown'"); // 引号保留(与 Go 一致)
+        assert_eq!(table.columns[2].default, "'unknown'"); // 引号保留
         assert!(!table.columns[3].default.is_empty());
         assert_eq!(table.columns[4].default, "false");
     }

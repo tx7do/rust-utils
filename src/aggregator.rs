@@ -1,4 +1,4 @@
-//! 关联数据回填工具(移植自 go-utils/aggregator):把按 ID 批量取到的
+//! 关联数据回填工具:把按 ID 批量取到的
 //! 资源填充回结果对象或对象树,附带回退式并行执行器。
 //!
 //! 典型场景:列表页查出 N 条主对象,再按 `user_id` 批量取用户,
@@ -216,7 +216,7 @@ impl std::fmt::Display for ParallelError {
 
 impl std::error::Error for ParallelError {}
 
-/// 并行执行选项,对应 Go 版的 `WithLimit` / `WithTimeout` / `WithRetry`。
+/// 并行执行选项:并发上限、超时、重试次数。
 #[derive(Debug, Clone)]
 pub struct ParallelOptions {
     /// 最大并发数(默认 20)。
@@ -289,7 +289,7 @@ pub fn execute_parallel(
                         break;
                     }
                     Ok(Err(e)) => last_err = Some(e),
-                    // panic 转错误(对应 Go 版 recover)
+                    // panic 转错误
                     Err(p) => {
                         last_err = Some(Box::new(std::io::Error::other(format!(
                             "parallel fetcher panic: {p:?}"
@@ -349,7 +349,7 @@ pub fn execute_parallel(
     }
 }
 
-/// 指数退避等待,带抖动(与 Go 版一致的 20ms 起步、2s 封顶)。
+/// 指数退避等待,带抖动(20ms 起步、2s 封顶)。
 fn backoff_wait(attempt: u32) {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -371,7 +371,7 @@ fn backoff_wait(attempt: u32) {
 }
 
 // ---------------------------------------------------------------------------
-// DataLoader 风格的缓存批量加载器(对应 Go 版 dataloader.go 的同步子集)
+// DataLoader 风格的缓存批量加载器(同步版)
 // ---------------------------------------------------------------------------
 
 /// 批量取数函数:一次拿到所有未缓存键对应的资源(取不到的键不出现
@@ -381,8 +381,8 @@ pub type BatchFetch<K, V> = Arc<dyn Fn(&[K]) -> HashMap<K, V> + Send + Sync>;
 /// 缓存式批量加载器:相同键只取一次,多个未命中键合并为一次批量取数
 /// (避免 N+1 查询)。
 ///
-/// 这是 Go 版基于 graph-gophers/dataloader 的请求级自动批处理的同步
-/// 简化版:批处理由调用方触发(`load_many`),不做后台窗口合并。
+/// 与异步 DataLoader 的请求级自动批处理不同,这里是显式的同步批量
+/// 加载:批处理由调用方触发(`load_many`),不做后台窗口合并。
 /// 取不到的键会记为"已查询缺失",在 [`clear`](Self::clear) 之前不再
 /// 触发取数(与 DataLoader 的错误缓存语义一致)。
 ///
@@ -600,7 +600,7 @@ mod tests {
             |o| vec![o.id, 1], // 每单再挂一个用户1
             |o, names| o.tags = names,
         );
-        assert_eq!(items[0].tags, vec!["张三", "张三"]); // 重复 ID 各取一次(与 Go 一致)
+        assert_eq!(items[0].tags, vec!["张三", "张三"]); // 重复 ID 各取一次
         assert_eq!(items[1].tags, vec!["李四", "张三"]);
         assert_eq!(items[2].tags, vec!["张三"]);
     }

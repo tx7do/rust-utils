@@ -1,8 +1,7 @@
-//! 银行卡 BIN 查询与校验(移植自 go-utils/bank_card),feature
-//! `bank-card`。
+//! 银行卡 BIN 查询与校验,feature `bank-card`。
 //!
-//! 内嵌了 Go 版 SQLite 库导出的完整数据(2013 条 BIN 记录、275 家银行,
-//! 首次查询时惰性解析为内存表),无需任何数据库依赖。
+//! 内嵌 2013 条 BIN 记录、275 家银行的完整数据,首次查询时惰性解析为
+//! 内存表,无需任何数据库依赖。
 //!
 //! ```
 //! use rust_utils::bank_card;

@@ -1,13 +1,12 @@
-//! 切片辅助函数(移植自 go-utils/sliceutil)。
+//! 切片辅助函数。
 //!
 //! 过滤/映射/规约这类操作 Rust 迭代器原生覆盖(`iter().filter()`、
-//! `iter().map()`、`iter().sum()`),这里只保留 Go 版中有增量价值的部分:
+//! `iter().map()`、`iter().sum()`),这里补充迭代器之外有增量价值的部分:
 //! 查找族、集合运算、去重、分块、展平等。
 //!
-//! 两个与 Go 版不同的修正:
-//! - `find_last_index` / `find_last_index_of`:Go 版从 `len-1` 遍历到 `i > 0`,
-//!   永远检查不到下标 0,这里修正为完整遍历;
-//! - 空切片集合运算在 Go 中可能触发空切片下标,这里做了保护。
+//! 两个实现细节:
+//! - `find_last_index` / `find_last_index_of` 从尾部完整遍历,下标 0 也会被检查;
+//! - 空切片的集合运算做了保护,不会 panic。
 
 /// 查找第一个满足条件的元素。
 pub fn find<T>(slice: &[T], predicate: impl Fn(&T, usize) -> bool) -> Option<&T> {
@@ -201,7 +200,7 @@ mod tests {
         assert_eq!(find_index(&v, |x, _| *x > 9), None);
         assert_eq!(find_index_of(&v, &3), Some(2));
         assert_eq!(find_last_index(&v, |x, _| *x > 2), Some(4));
-        // Go 版跳过下标 0 的回归用例:唯一的奇数在下标 0
+        // 覆盖下标 0 的回归用例:唯一的奇数在下标 0
         let w = vec![5, 2];
         assert_eq!(find_last_index(&w, |x, _| *x % 2 == 1), Some(0));
         assert_eq!(find_last_index_of(&v, &3), Some(4));

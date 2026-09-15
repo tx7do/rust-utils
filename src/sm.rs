@@ -1,10 +1,10 @@
-//! 国密算法(对应 Go 版 crypto 包的 SM2/SM3/SM4 部分),feature `sm`。
+//! 国密算法:SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/
+//! SM4-CBC,feature `sm`。
 //!
 //! 基于 `libsm` crate:SM3 哈希、SM4 分组密码(CBC 模式 + PKCS#7
 //! 填充,在本模块内基于单块原语实现)、SM2 非对称加解密与签名
-//! 验签([`Sm2Cipher`],加解密保持上游 gmsm 的 C1C3C2 拼接布局与
-//! DER 包装格式,签名验签与上游 `SignDigitToSignData`/
-//! `SignDataToSignDigit` 对应的 DER 形态一致)。
+//! 验签([`Sm2Cipher`],加解密采用 C1C3C2 拼接布局与 DER 包装
+//! 格式,签名验签为 `r‖s` 的 DER 编解码形态)。
 //!
 //! ```
 //! use rust_utils::crypto::Cipher;
@@ -99,17 +99,15 @@ use libsm::sm2::encrypt::{DecryptCtx, EncryptCtx};
 use libsm::sm2::signature::{SigCtx, Signature};
 use num_bigint::BigUint;
 
-/// SM2 非对称加解密与签名验签(对应 Go 版 `SM2Cipher`,libsm 后端)。
+/// SM2 非对称加解密与签名验签(libsm 后端)。
 ///
-/// 加解密维持上游 gmsm `Encrypt`/`Decrypt`(`C1C3C2` 模式)的拼接
-/// 布局:`0x04 ‖ X ‖ Y ‖ C3 ‖ C2`(`X`/`Y` 为 32 字节大端,`C3`
-/// 为 32 字节 SM3 摘要,`C2` 为密文)。`encrypt_asn1`/`decrypt_asn1`
-/// 对应上游 `EncryptAsn1`/`DecryptAsn1`:同一数据的
+/// 加解密采用 `C1C3C2` 模式的拼接布局:`0x04 ‖ X ‖ Y ‖ C3 ‖ C2`
+/// (`X`/`Y` 为 32 字节大端,`C3` 为 32 字节 SM3 摘要,`C2` 为
+/// 密文)。`encrypt_asn1`/`decrypt_asn1` 为同一数据的
 /// `SEQUENCE { INTEGER x, INTEGER y, OCTET STRING hash, OCTET
-/// STRING cipherText }` DER 包装(上游 `CipherMarshal`/
-/// `CipherUnmarshal`)。签名验签经上游 `SignDigitToSignData`/
-/// `SignDataToSignDigit` 对应的 DER 编解码,并以 base64 传输;
-/// ZA 摘要使用上游默认 UID `1234567812345678`。
+/// STRING cipherText }` DER 包装。签名验签为 `r‖s` 的 DER
+/// 编解码,并以 base64 传输;ZA 摘要使用默认 UID
+/// `1234567812345678`。
 ///
 /// 仅适用于小数据块加密(如密钥交换),不适合大数据流;生产环境
 /// 请妥善管理私钥。
@@ -128,7 +126,7 @@ pub struct Sm2Cipher {
 }
 
 impl Sm2Cipher {
-    /// 生成新密钥对(上游 `NewSM2Cipher`)。
+    /// 生成新密钥对。
     pub fn new() -> Result<Self, String> {
         let (pk, sk) = SigCtx::new()
             .new_keypair()
@@ -136,8 +134,8 @@ impl Sm2Cipher {
         Ok(Self { sk, pk })
     }
 
-    /// 由序列化密钥对恢复(上游 `NewSM2CipherFromKey` 的字节形态;
-    /// 私钥为大整数表示,公钥为 65 字节非压缩点)。
+    /// 由序列化密钥对恢复(私钥为大整数表示,公钥为 65 字节
+    /// 非压缩点)。
     pub fn from_keys(priv_bytes: &[u8], pub_bytes: &[u8]) -> Result<Self, String> {
         let ctx = SigCtx::new();
         let sk = ctx
@@ -149,33 +147,33 @@ impl Sm2Cipher {
         Ok(Self { sk, pk })
     }
 
-    /// 公钥序列化(上游 `PublicKey()` 的导出形态;65 字节非压缩点)。
+    /// 公钥序列化(65 字节非压缩点)。
     pub fn public_key_bytes(&self) -> Result<Vec<u8>, String> {
         SigCtx::new()
             .serialize_pubkey(&self.pk, false)
             .map_err(|e| format!("sm2 serialize public key failed: {e:?}"))
     }
 
-    /// 私钥序列化(上游 `PrivateKey()`;仅用于安全存储,禁止对外泄露)。
+    /// 私钥序列化(仅用于安全存储,禁止对外泄露)。
     pub fn private_key_bytes(&self) -> Result<Vec<u8>, String> {
         SigCtx::new()
             .serialize_seckey(&self.sk)
             .map_err(|e| format!("sm2 serialize private key failed: {e:?}"))
     }
 
-    /// ASN.1(DER)包装的加密(上游 `EncryptAsn1`)。
+    /// ASN.1(DER)包装的加密。
     pub fn encrypt_asn1(&self, plain: &[u8]) -> Result<Vec<u8>, String> {
         let raw = Cipher::encrypt(self, plain)?;
         cipher_marshal(&raw, plain.len())
     }
 
-    /// ASN.1(DER)包装的解密(上游 `DecryptAsn1`)。
+    /// ASN.1(DER)包装的解密。
     pub fn decrypt_asn1(&self, data: &[u8]) -> Result<Vec<u8>, String> {
         let raw = cipher_unmarshal(data)?;
         Cipher::decrypt(self, &raw)
     }
 
-    /// 签名(上游 `Sign`:DER 编码的 `r‖s`,base64 传输)。
+    /// 签名(DER 编码的 `r‖s`,base64 传输)。
     pub fn sign(&self, data: &[u8]) -> Result<String, String> {
         let sig = SigCtx::new()
             .sign(data, &self.sk, &self.pk)
@@ -183,7 +181,7 @@ impl Sm2Cipher {
         Ok(base64util::encode(&sig.der_encode()))
     }
 
-    /// 验签(上游 `Verify`)。
+    /// 验签。
     pub fn verify(&self, data: &[u8], signature: &str) -> Result<bool, String> {
         let der = base64util::decode(signature)?;
         let sig = Signature::der_decode(&der)
@@ -200,7 +198,7 @@ impl Cipher for Sm2Cipher {
         let raw = EncryptCtx::new(klen, self.pk)
             .encrypt(plain)
             .map_err(|e| format!("sm2 encrypt failed: {e:?}"))?;
-        // libsm 布局(C1‖C2‖C3)→ 上游 C1C3C2 布局(C1‖C3‖C2)
+        // libsm 布局(C1‖C2‖C3)→ C1C3C2 布局(C1‖C3‖C2)
         let mut out = Vec::with_capacity(raw.len());
         out.extend_from_slice(&raw[..65]);
         out.extend_from_slice(&raw[65 + klen..]);
@@ -209,7 +207,7 @@ impl Cipher for Sm2Cipher {
     }
 
     fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>, String> {
-        // 上游 C1C3C2 布局 → libsm 布局
+        // C1C3C2 布局 → libsm 布局
         if data.len() < 97 {
             return Err("sm2 invalid ciphertext length".to_string());
         }
@@ -228,7 +226,7 @@ impl Cipher for Sm2Cipher {
     }
 }
 
-/// 上游 `CipherMarshal`:C1C3C2 拼接布局 → DER
+/// C1C3C2 拼接布局 → DER
 /// `SEQUENCE { INTEGER x, INTEGER y, OCTET STRING hash, OCTET STRING cipherText }`。
 fn cipher_marshal(raw: &[u8], klen: usize) -> Result<Vec<u8>, String> {
     if raw.len() != 97 + klen {
@@ -247,8 +245,8 @@ fn cipher_marshal(raw: &[u8], klen: usize) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// 上游 `CipherUnmarshal`:DER 包装 → C1C3C2 拼接布局。
-/// (上游对 X/Y 不补齐 32 字节,此处补齐以匹配原始布局。)
+/// DER 包装 → C1C3C2 拼接布局。
+/// (C1 的 X/Y 分量按 32 字节前导补零,避免短 C1 解密错位。)
 fn cipher_unmarshal(der: &[u8]) -> Result<Vec<u8>, String> {
     let mut outer = 0usize;
     let seq = parse_tlv(der, &mut outer, 0x30)?; // 外层 SEQUENCE
@@ -408,7 +406,7 @@ mod tests {
 
     #[test]
     fn test_sm2_encrypt_decrypt_roundtrip() {
-        // 上游 TestSM2Cipher_EncryptDecrypt
+        // 加解密往返
         let cipher = super::Sm2Cipher::new().unwrap();
         for plain in [
             b"hello, sm2 cipher test!".as_slice(),
@@ -416,7 +414,7 @@ mod tests {
             b"x".as_slice(),
         ] {
             let sealed = cipher.encrypt(plain).unwrap();
-            // 上游 C1C3C2 拼接布局:0x04 ‖ X(32) ‖ Y(32) ‖ C3(32) ‖ C2
+            // C1C3C2 拼接布局:0x04 ‖ X(32) ‖ Y(32) ‖ C3(32) ‖ C2
             assert_eq!(sealed.len(), 97 + plain.len());
             assert_eq!(sealed[0], 0x04);
             assert_ne!(&sealed[97..], plain);
@@ -429,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_sm2_encrypt_decrypt_asn1_roundtrip() {
-        // 上游 TestSM2Cipher_EncryptDecryptAsn1
+        // ASN.1 加解密往返
         let cipher = super::Sm2Cipher::new().unwrap();
         let plain = b"hello, sm2 asn1 test!".to_vec();
         let sealed = cipher.encrypt_asn1(&plain).unwrap();
@@ -449,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_sm2_sign_verify() {
-        // 上游 TestSM2Cipher_SignVerify
+        // 签名验签
         let cipher = super::Sm2Cipher::new().unwrap();
         let data = b"hello, sm2 sign test!";
         let sig = cipher.sign(data).unwrap();

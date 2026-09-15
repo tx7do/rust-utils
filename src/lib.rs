@@ -1,40 +1,44 @@
-//! rust-utils —— 从 [tx7do/go-utils](https://github.com/tx7do/go-utils) 移植的 Rust 工具箱。
+//! rust-utils —— 通用 Rust 工具箱。
 //!
-//! 核心模块零依赖;重依赖的能力(时间、随机、密码哈希、加密、JWT 等)通过
-//! feature 按需启用,见 README。
+//! 设计原则:**核心模块零依赖**(只依赖 `std`),重依赖的能力(时间、随机、
+//! 密码哈希、加密、JWT 等)通过 feature 按需启用;全 crate
+//! `#![forbid(unsafe_code)]`;边界读取(geoip、ddl_parser 等)对越界与
+//! 畸形输入一律返回错误或空结果,不做 panic。
 //!
-//! 各模块与 Go 包的对应关系:
+//! 各模块与 feature 的对应关系:
 //!
-//! | Rust 模块        | Go 包           | feature          |
-//! |------------------|-----------------|------------------|
-//! | [`byteutil`]     | byteutil        | 默认             |
-//! | [`stringcase`]   | stringcase      | 默认             |
-//! | [`stringutil`]   | stringutil      | 默认             |
-//! | [`sliceutil`]    | sliceutil       | 默认             |
-//! | [`maputil`]      | maputils        | 默认             |
-//! | [`mathutil`]     | math            | 默认             |
-//! | [`pagination`]   | pagination      | 默认             |
-//! | [`cryptocurrency`] | cryptocurrency | 默认            |
-//! | [`bank_card`]    | bank_card       | `bank-card`      |
-//! | [`query_parser`] | query_parser    | `json`           |
-//! | [`ddl_parser`]   | ddl_parser      | 默认             |
-//! | [`eventloop`]    | eventloop       | 默认             |
-//! | [`aggregator`]   | aggregator      | 默认             |
-//! | [`id`]           | id              | 默认(`uuid` 可选) |
-//! | [`fsutil`]       | ioutil          | 默认(`glob` 可选) |
-//! | [`dateutil`]     | dateutil        | `chrono`         |
-//! | [`timeutil`]     | timeutil        | `chrono`         |
-//! | [`random`]       | rand            | `rand`           |
-//! | [`name_generator`] | name_generator | `name-generator` |
-//! | [`slug`]         | slug            | `slug`           |
-//! | [`password`]     | password        | `password`       |
-//! | [`crypto`]       | crypto          | `crypto`         |
-//! | [`sm`]           | crypto(SM 部分) | `sm`            |
-//! | [`captcha`]      | captcha         | `captcha`(Redis 落地用 `captcha-redis`) |
-//! | [`geoip`]        | geoip           | `geoip`           |
-//! | [`translator`]   | translator      | `translator`      | 翻译器四后端:百度(MD5 签名)/阿里(RPC 签名)/谷歌(v1 裸端点、v2/v3 REST 等价)/火山(HMAC-SHA256 派生链);请求构造与签名可离线验证 |
-//! | [`distlock`]     | distlock        | `distlock`        | 分布式锁:Locker/Lock 抽象与获取选项(Redis 落地用 `distlock-redis`,按 bsm/redislock 协议逐式复刻;etcd 后端未移植) |
-//! | [`jwt`]          | jwtutil         | `jwt`            |
+//! | 模块 | feature | 说明 |
+//! |------|---------|------|
+//! | [`byteutil`] | 默认 | 整数/字节互转、ASCII 大小写 |
+//! | [`stringcase`] | 默认 | 驼峰/蛇形/烤肉串转换,识别缩写词与数字段 |
+//! | [`stringutil`] | 默认 | 宽松数值/布尔解析、JSON 字段值重写 |
+//! | [`sliceutil`] | 默认 | 查找族、交集/差集/并集、去重、分块 |
+//! | [`maputil`] | 默认 | keys/values/merge/drop/filter |
+//! | [`mathutil`] | 默认 | 统计量、手写正态分布(Gaussian)、Erfc/Ierfc |
+//! | [`pagination`] | 默认 | 分页偏移量 |
+//! | [`cryptocurrency`] | 默认 | 加密货币钱包地址格式校验 |
+//! | [`query_parser`] | `json` | Django 风格 `field__op` 过滤/排序解析 |
+//! | [`ddl_parser`] | 默认 | MySQL `CREATE TABLE` 解析(手写词法,零依赖) |
+//! | [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
+//! | [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
+//! | [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
+//! | [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
+//! | [`dateutil`] | `chrono` | 日粒度取整、区间判断 |
+//! | [`timeutil`] | `chrono` | 今天/昨天/本月/上月区间、时间差、格式转换 |
+//! | [`random`] | `rand` | 随机工具:加权/别名表/骰子/抖动/正态/手机号等 |
+//! | [`name_generator`] | `name-generator` | 随机昵称与中英日姓名(内嵌词库) |
+//! | [`slug`] | `slug` | URL slug(unicode 转写) |
+//! | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 |
+//! | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充 |
+//! | [`jwt`] | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
+//! | [`bank_card`] | `bank-card` | Luhn 校验 + BIN 查询(内嵌记录) |
+//! | [`captcha`] | `captcha`(Redis 落地用 `captcha-redis`) | 图形验证码:四类文本驱动 + 滑块/点选/旋转,自绘渲染 |
+//! | [`geoip`] | `geoip` | IP 归属地三后端:qqwry、ip2region xdb v2、MaxMind mmdb,数据由调用方加载 |
+//! | [`translator`] | `translator` | 翻译器四后端:百度/阿里/谷歌/火山,请求构造与签名可离线验证 |
+//! | [`distlock`] | `distlock`(Redis 落地用 `distlock-redis`) | 分布式锁 Locker/Lock 抽象与获取选项 |
+//! | [`tls`] | `tls` | 从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
+//! | [`fieldmask`] | `fieldmask` | 字段掩码:嵌套掩码树 + filter/prune/overwrite/validate |
+//! | [`sm`] | `sm` | 国密 SM2(C1C3C2/ASN.1)/SM3/SM4-CBC |
 
 #![allow(clippy::module_inception)]
 

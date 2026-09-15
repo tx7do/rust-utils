@@ -1,26 +1,22 @@
-//! 谷歌翻译后端(对应 Go 版 `translator/google`,feature `translator`)。
+//! 谷歌翻译后端,feature `translator`。
 //!
-//! v1 为上游的裸 HTTP 端点(`translate.googleapis.com/translate_a`,
-//! 拼接 URL,嵌套数组响应取各段首元素拼接);v2/v3 上游经官方
-//! 客户端库调用,此处按其 REST 线上形态等价实现(v2:
-//! `language/translate/v2`,`key` 查询参数 + JSON 体,上游丢弃
-//! 源语言;v3:`/v3/:translateText`,上游从不设置 parent,空父
-//! 路径下由服务端报错,密钥经 `x-goog-api-key` 头)。
+//! v1 为裸 HTTP 端点(`translate.googleapis.com/translate_a`,
+//! 拼接 URL,嵌套数组响应取各段首元素拼接);v2 为 REST 调用
+//! (`language/translate/v2`,`key` 查询参数 + JSON 体,源语言
+//! 参数被丢弃);v3 为 REST 调用(`/v3/:translateText`,不设置
+//! parent,空父路径下由服务端报错,密钥经 `x-goog-api-key` 头)。
 //!
-//! 与上游的差异:上游的 `encodeURI` 实为 `url.QueryEscape`
-//! (注释与实现不符),按实现语义移植;`language.Parse` 的
-//! BCP47 校验未移植(标签原样透传);上游把传输错误连同占位串
-//! `"err"` 一并返回,此处仅返回错误;响应数组越界(上游类型
-//! 断言 panic)一律返回错误;v2 响应键名按公开 API 文档
-//! (`translatedText`)。v2/v3 响应中上游的源语言标签未被使用,
-//! 未建模。
+//! 请求行为:单次请求,不自动重试,错误一律为字符串;语言标签
+//! 原样透传,不做 BCP47 校验;文本经 `query_escape` 编码,语言
+//! 参数原样拼接。响应解析对越界/畸形数据一律返回错误,不 panic;
+//! v2 响应键名按谷歌公开 API 文档(`translatedText`)。v2/v3
+//! 响应中的源语言标签未被使用,未建模。
 
 use crate::translator::query_escape;
 use serde::{Deserialize, Serialize};
 
-/// 谷歌翻译器(上游 `google.Translator`:上游 `WithVersion`/
-/// `WithApiKey` 的选项语义,默认版本为 v1;上游客户端无显式
-/// 超时,此处保持默认)。
+/// 谷歌翻译器(默认版本为 v1,经 `with_version`/`with_api_key`
+/// 设置版本与密钥;客户端无显式超时)。
 pub struct Translator {
     version: String,
     api_key: String,
@@ -34,7 +30,7 @@ impl Default for Translator {
 }
 
 impl Translator {
-    /// 创建(上游 `NewTranslator`)。
+    /// 创建。
     pub fn new() -> Self {
         Self {
             version: String::new(),
@@ -43,20 +39,20 @@ impl Translator {
         }
     }
 
-    /// 设置 API 版本(上游 `WithVersion`)。
+    /// 设置 API 版本。
     pub fn with_version(mut self, version: &str) -> Self {
         self.version = version.to_string();
         self
     }
 
-    /// 设置 API 密钥(上游 `WithApiKey`)。
+    /// 设置 API 密钥。
     pub fn with_api_key(mut self, key: &str) -> Self {
         self.api_key = key.to_string();
         self
     }
 
-    /// v1 的 URL 构造(上游 `TranslateV1` 的拼接:语言参数原样,
-    /// 文本经 `query_escape`——上游 `encodeURI` 的实现)。
+    /// v1 的 URL 构造(语言参数原样拼接,文本经 `query_escape`
+    /// 编码)。
     fn build_v1_uri(source: &str, source_lang: &str, target_lang: &str) -> String {
         format!(
             "https://translate.googleapis.com/translate_a/single?client=gtx&sl={source_lang}&tl={target_lang}&dt=t&q={}",
@@ -64,8 +60,8 @@ impl Translator {
         )
     }
 
-    /// v2 的请求构造(上游 `TranslateV2` 的 REST 等价;上游丢弃
-    /// 源语言参数)。
+    /// v2 的请求构造(`key` 查询参数 + JSON 体,源语言参数被
+    /// 丢弃)。
     fn build_v2_request(&self, source: &str, target_lang: &str) -> (String, String) {
         let url = format!(
             "https://translation.googleapis.com/language/translate/v2?key={}",
@@ -75,8 +71,7 @@ impl Translator {
         (url, body)
     }
 
-    /// v3 的请求构造(上游 `TranslateV3` 的 REST 等价:空父路径,
-    /// 密钥经 `x-goog-api-key` 头)。
+    /// v3 的请求构造(不设置 parent,密钥经 `x-goog-api-key` 头)。
     fn build_v3_request(
         &self,
         source: &str,
@@ -98,7 +93,7 @@ impl Translator {
         )
     }
 
-    /// v1 响应解析(上游 `TranslateV1` 的响应处理)。
+    /// v1 响应解析。
     fn parse_v1_response(body: &str) -> Result<String, String> {
         if body.contains("<title>Error 400 (Bad Request") {
             return Err("error 400 (Bad Request)".to_string());
@@ -106,7 +101,7 @@ impl Translator {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
             return Err("error unmarshalling data".to_string());
         };
-        // 上游以 []interface{} 解析,此处要求顶层数组
+        // 要求顶层数组为 JSON 数组
         let Some(outer) = value.as_array() else {
             return Err("error unmarshalling data".to_string());
         };
@@ -119,10 +114,10 @@ impl Translator {
         let mut text = String::new();
         for segment in inner {
             let Some(segment_array) = segment.as_array() else {
-                // 上游对非数组内层元素做类型断言即 panic,此处按解析错误
+                // 非数组的内层元素按解析错误处理
                 return Err("error unmarshalling data".to_string());
             };
-            // 上游取首元素并以 %v 格式化;非字符串元素此处跳过
+            // 取各段首元素;非字符串元素跳过
             if let Some(serde_json::Value::String(s)) = segment_array.first() {
                 text.push_str(s);
             }
@@ -130,8 +125,7 @@ impl Translator {
         Ok(text)
     }
 
-    /// v2 响应解析(上游 `TranslateV2` 的响应处理;上游对空列表
-    /// 做索引 panic,此处返回错误)。
+    /// v2 响应解析(翻译列表为空或缺失时返回错误)。
     fn parse_v2_response(body: &str) -> Result<String, String> {
         let resp: V2Response = serde_json::from_str(body).map_err(|e| e.to_string())?;
         let Some(translation) = resp
@@ -144,20 +138,19 @@ impl Translator {
         Ok(translation.translated_text.unwrap_or_default())
     }
 
-    /// v3 响应解析(上游 `TranslateV3` 的响应处理:数量非一时
-    /// 上游以 `%w` 格式化 nil 错误,此处按其原文输出)。
+    /// v3 响应解析(数量非一时返回固定错误文本)。
     fn parse_v3_response(body: &str) -> Result<String, String> {
         let resp: V3Response = serde_json::from_str(body).map_err(|e| e.to_string())?;
         let translations = resp.translations.unwrap_or_default();
         if translations.len() != 1 {
-            return Err("TranslateText: %!w(<nil>)".to_string());
+            return Err("TranslateText: expected exactly one translation".to_string());
         }
         Ok(translations[0].translated_text.clone().unwrap_or_default())
     }
 }
 
 impl crate::translator::Translator for Translator {
-    /// 翻译(上游 `Translate` 的版本分派:默认与未知版本走 v1)。
+    /// 翻译(按版本分派:默认与未知版本走 v1)。
     fn translate(
         &self,
         source: &str,
@@ -173,7 +166,7 @@ impl crate::translator::Translator for Translator {
 }
 
 impl Translator {
-    /// v1 路径(上游 `TranslateV1`)。
+    /// v1 路径。
     pub fn translate_v1(
         &self,
         source: &str,
@@ -193,8 +186,7 @@ impl Translator {
         Self::parse_v1_response(&body)
     }
 
-    /// v2 路径(上游 `TranslateV2`:上游客户端库对非 2xx 直接
-    /// 报错,源语言被丢弃)。
+    /// v2 路径(非 2xx 直接报错,源语言被丢弃)。
     pub fn translate_v2(
         &self,
         source: &str,
@@ -215,8 +207,8 @@ impl Translator {
         Self::parse_v2_response(&resp_body)
     }
 
-    /// v3 路径(上游 `TranslateV3`:错误经 `TranslateText: ` 前缀
-    /// 包装,含上游从不设置 parent 导致的服务端错误)。
+    /// v3 路径(错误经 `TranslateText: ` 前缀包装,含不设置
+    /// parent 时服务端返回的错误)。
     pub fn translate_v3(
         &self,
         source: &str,
@@ -241,43 +233,42 @@ impl Translator {
     }
 }
 
-/// v2 响应(上游 `translateListResponse`)。
+/// v2 响应。
 #[derive(Deserialize)]
 struct V2Response {
     #[serde(default, rename = "data")]
     data: Option<V2Data>,
 }
 
-/// v2 响应内层(上游 `translateListResponseData`)。
+/// v2 响应内层。
 #[derive(Deserialize)]
 struct V2Data {
     #[serde(default, rename = "translations")]
     translations: Option<Vec<V2Translation>>,
 }
 
-/// v2 翻译条目(上游 `TranslationsResource`)。
+/// v2 翻译条目。
 #[derive(Deserialize)]
 struct V2Translation {
     #[serde(default, rename = "translatedText")]
     translated_text: Option<String>,
 }
 
-/// v3 响应(上游 `translatepb.TranslateTextResponse`)。
+/// v3 响应。
 #[derive(Deserialize)]
 struct V3Response {
     #[serde(default, rename = "translations")]
     translations: Option<Vec<V3Translation>>,
 }
 
-/// v3 翻译条目(上游 `translatepb.TranslateTextResponse.Translation`)。
+/// v3 翻译条目。
 #[derive(Deserialize)]
 struct V3Translation {
     #[serde(default, rename = "translatedText")]
     translated_text: Option<String>,
 }
 
-/// v3 请求体(上游 `translatepb.TranslateTextRequest` 中被上游
-/// 设置的子集)。
+/// v3 请求体。
 #[derive(Serialize)]
 struct V3Request<'a> {
     #[serde(rename = "sourceLanguageCode")]
@@ -310,7 +301,7 @@ mod tests {
             Translator::build_v1_uri("你好", "en", "zh-CN"),
             "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=%E4%BD%A0%E5%A5%BD"
         );
-        // 语言参数不经转义(上游原样拼接),文本经 QueryEscape
+        // 语言参数不经转义,文本经 query_escape 编码
         assert_eq!(
             Translator::build_v1_uri("a b", "e n", "zh"),
             "https://translate.googleapis.com/translate_a/single?client=gtx&sl=e n&tl=zh&dt=t&q=a+b"
@@ -346,13 +337,13 @@ mod tests {
             Translator::parse_v1_response(r#"[[["Hello","x"],["world","y"]]]"#).unwrap(),
             "Helloworld"
         );
-        // 上游:空内层表 → 空串
+        // 空内层表 → 空串
         assert_eq!(Translator::parse_v1_response("[[[]]]").unwrap(), "");
         assert_eq!(
             Translator::parse_v1_response("[]").unwrap_err(),
             "no translated data in response"
         );
-        // 非数组顶层数据/内层段(上游类型断言 panic)、非 JSON
+        // 非数组顶层数据/内层段、非 JSON
         assert_eq!(
             Translator::parse_v1_response("{}").unwrap_err(),
             "error unmarshalling data"
@@ -369,7 +360,7 @@ mod tests {
             Translator::parse_v1_response("not json").unwrap_err(),
             "error unmarshalling data"
         );
-        // 上游的 400 标题检查
+        // 含 400 错误标题的 HTML
         assert_eq!(
             Translator::parse_v1_response("<html><title>Error 400 (Bad Request)</title></html>")
                 .unwrap_err(),
@@ -384,7 +375,7 @@ mod tests {
                 .unwrap(),
             "hi"
         );
-        // 空列表/缺失:上游索引 panic,此处报错
+        // 空列表/缺失:报错
         assert!(Translator::parse_v2_response(r#"{"data":{"translations":[]}}"#).is_err());
         assert!(Translator::parse_v2_response("{}").is_err());
         assert!(Translator::parse_v2_response("not json").is_err());
@@ -396,14 +387,14 @@ mod tests {
             Translator::parse_v3_response(r#"{"translations":[{"translatedText":"hi"}]}"#).unwrap(),
             "hi"
         );
-        // 数量非一/缺失:上游 %w 于 nil 的原文输出
+        // 数量非一/缺失:固定错误文本
         assert_eq!(
             Translator::parse_v3_response(r#"{"translations":[]}"#).unwrap_err(),
-            "TranslateText: %!w(<nil>)"
+            "TranslateText: expected exactly one translation"
         );
         assert_eq!(
             Translator::parse_v3_response("{}").unwrap_err(),
-            "TranslateText: %!w(<nil>)"
+            "TranslateText: expected exactly one translation"
         );
         assert!(Translator::parse_v3_response("not json").is_err());
     }

@@ -1,6 +1,6 @@
-//! 日期辅助:日粒度取整与区间判断(移植自 go-utils/dateutil)。
+//! 日期辅助:日粒度取整与区间判断。
 //!
-//! 全部基于 UTC(与 Go 版一致)。
+//! 全部基于 UTC。
 
 use chrono::{DateTime, TimeZone, Utc};
 
@@ -45,9 +45,7 @@ pub fn overlap<Tz: TimeZone, Tz2: TimeZone>(
     let e1 = end1.with_timezone(&Utc);
     let s2 = start2.with_timezone(&Utc);
     let e2 = end2.with_timezone(&Utc);
-    // Go 版公式的忠实转写。Go 的 AfterOrEqual(m, d) = d >= m、
-    // BeforeOrEqual(m, d) = d <= m(第二个参数是被比较的 date),
-    // 代入四个条件后等价于"任一区间的端点落在另一区间内":
+    // 区间相交当且仅当"任一区间的端点落在另一区间内":
     (s1 >= s2 && s1 <= e2)
         || (e1 >= s2 && e1 <= e2)
         || (s2 >= s1 && s2 <= e1)

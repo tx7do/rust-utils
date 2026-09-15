@@ -1,27 +1,22 @@
-//! ip2region xdb v2 查询器(对应 Go 版 `geoip/ip2region`,feature `geoip`)。
+//! ip2region xdb v2 查询器(feature `geoip`)。
 //!
 //! 数据格式:256 字节文件头,其后 512KiB 向量索引(按 IP 前两字节
 //! 定位段索引范围),再后为段索引与数据段。IPv4 段索引条目 14 字节
 //! (起始/结束 IP 按小端存储,比较时反转为大端),IPv6 条目 38 字节
 //! (IP 按原始字节序)。
 //!
-//! 与上游的差异:
+//! 实现要点:
 //!
-//! - 数据文件不由库内嵌(Go 版 `go:embed` 了两个 51 MB 的 xdb),
-//!   各构造函数改为接收字节序列;
-//! - 越界读取由 Go 的 panic/slice 越界改为统一的不完整读取错误
-//!   (含文件头与向量索引的长度校验,上游为切片 panic);
-//! - 地域字节串按 UTF-8 有损转为 `String`(Go 的 `string()` 接受
-//!   任意字节;真实 xdb 地域串为 UTF-8,仅畸形数据受影响);
-//! - IPv4 的 IP 比较上游对索引字节做原地交换,此处为等价的只读
-//!   反转;
-//! - Go channel 池改为 `Mutex`+`Condvar` 的阻塞借还;
-//! - 未移植:查询器与池的 `Close`/`Close` 超时变体(查询器不持有
-//!   需要关闭的资源,上游 `Searcher.Close` 本为空操作)、池的
-//!   closing 信号(同因)、文件句柄读取路径(查询器仅由缓冲构造,
-//!   上游无缓冲时读回全零的行为保留)、`Header`/`Config` 的
-//!   `String()`、以及 `VersionFromIP`/`IP2String`/`IPAddOne`/
-//!   `IPSubOne` 等 go-utils 未调用的工具函数。
+//! - 数据文件不由库内嵌,各构造函数接收字节序列,由调用方自行
+//!   加载;
+//! - 越界/畸形输入不 panic:越界读取统一返回不完整读取错误,
+//!   含文件头与向量索引的长度校验;
+//! - 地域字节串按 UTF-8 有损转为 `String`(真实 xdb 地域串为
+//!   UTF-8,仅畸形数据受影响);
+//! - IPv4 的 IP 比较为只读的字节反转(索引字节原地不动,比较前
+//!   反转为大端);
+//! - 查询器池以 `Mutex`+`Condvar` 实现阻塞借还;
+//! - 查询器不持有需要关闭的资源,不提供 `Close`。
 
 use crate::geoip::{parse_ip_bytes, GeoResult};
 use std::cmp::Ordering;
@@ -39,7 +34,7 @@ const VECTOR_INDEX_SIZE: usize = 8;
 const VECTOR_INDEX_LENGTH: usize =
     HEADER_INFO_LENGTH + VECTOR_INDEX_ROWS * VECTOR_INDEX_COLS * VECTOR_INDEX_SIZE;
 
-/// IP 版本(上游 `xdb.Version`)。
+/// IP 版本。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IpVersion {
     /// IPv4:地址 4 字节,段索引条目 14 字节,索引内 IP 按小端存储。
@@ -78,7 +73,7 @@ impl IpVersion {
     }
 }
 
-// 上游 Version.String() 的字面输出,版本不匹配错误文案引用它。
+// 版本不匹配错误文案引用该字面输出格式。
 impl fmt::Display for IpVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -92,8 +87,8 @@ impl fmt::Display for IpVersion {
     }
 }
 
-/// 缓存策略(上游 `NoCache`/`VIndexCache`/`BufferCache` 常量;
-/// 三者在本实现中的查询路径等价,差异仅在于是否预载向量索引副本)。
+/// 缓存策略(三者在本实现中的查询路径等价,差异仅在于是否预载
+/// 向量索引副本)。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(i32)]
 pub enum CachePolicy {
@@ -102,7 +97,7 @@ pub enum CachePolicy {
     BufferCache = 2,
 }
 
-/// 策略名解析(上游 `CachePolicyFromName`)。
+/// 策略名解析。
 pub fn cache_policy_from_name(name: &str) -> Result<CachePolicy, String> {
     match name.to_lowercase().as_str() {
         "file" | "nocache" => Ok(CachePolicy::NoCache),
@@ -112,7 +107,7 @@ pub fn cache_policy_from_name(name: &str) -> Result<CachePolicy, String> {
     }
 }
 
-/// 版本名解析(上游 `xdb.VersionFromName`)。
+/// 版本名解析。
 pub fn version_from_name(name: &str) -> Result<IpVersion, String> {
     match name.to_uppercase().as_str() {
         "V4" | "IPV4" => Ok(IpVersion::IPv4),
@@ -121,7 +116,7 @@ pub fn version_from_name(name: &str) -> Result<IpVersion, String> {
     }
 }
 
-/// xdb 文件头(上游 `xdb.Header`:固定 256 字节,前 20 字节为字段)。
+/// xdb 文件头(固定 256 字节,前 20 字节为字段)。
 #[derive(Debug)]
 pub struct Header {
     pub version: u16,
@@ -133,8 +128,7 @@ pub struct Header {
     pub runtime_ptr_bytes: i32,
 }
 
-/// 头解析(上游 `xdb.NewHeader`:上游仅校验 16 字节却读取到第
-/// 20 字节,此处按实际读取范围校验)。
+/// 头解析(按实际读取范围校验,前 20 字节须齐备)。
 fn header_from_bytes(input: &[u8]) -> Result<Header, String> {
     if input.len() < 20 {
         return Err("invalid input buffer".to_string());
@@ -150,8 +144,7 @@ fn header_from_bytes(input: &[u8]) -> Result<Header, String> {
     })
 }
 
-/// 从整文件缓冲装载头(上游 `xdb.LoadHeaderFromBuff`:上游固定
-/// 切出前 256 字节,短缓冲直接越界 panic,此处返回错误)。
+/// 从整文件缓冲装载头(短缓冲返回错误)。
 fn load_header_from_buff(c_buff: &[u8]) -> Result<Header, String> {
     if c_buff.len() < HEADER_INFO_LENGTH {
         return Err(format!(
@@ -162,7 +155,7 @@ fn load_header_from_buff(c_buff: &[u8]) -> Result<Header, String> {
     header_from_bytes(c_buff)
 }
 
-/// 从整文件缓冲复制向量索引(上游 `xdb.LoadVectorIndexFromBuff`)。
+/// 从整文件缓冲复制向量索引。
 fn load_vector_index_from_buff(c_buff: &[u8]) -> Result<Vec<u8>, String> {
     if c_buff.len() < VECTOR_INDEX_LENGTH {
         return Err(format!(
@@ -173,8 +166,7 @@ fn load_vector_index_from_buff(c_buff: &[u8]) -> Result<Vec<u8>, String> {
     Ok(c_buff[HEADER_INFO_LENGTH..VECTOR_INDEX_LENGTH].to_vec())
 }
 
-/// 头版本判定(上游 `xdb.VersionFromHeader`:2.0 结构一律按
-/// IPv4;3.0 结构再看 IP 版本字段)。
+/// 头版本判定(2.0 结构一律按 IPv4;3.0 结构再看 IP 版本字段)。
 fn version_from_header(header: &Header) -> Result<IpVersion, String> {
     if header.version == STRUCTURE_20 {
         return Ok(IpVersion::IPv4);
@@ -189,7 +181,7 @@ fn version_from_header(header: &Header) -> Result<IpVersion, String> {
     }
 }
 
-/// 查询器构造配置(上游 `ip2region.Config`)。
+/// 查询器构造配置。
 #[derive(Debug)]
 pub struct Config {
     cache_policy: CachePolicy,
@@ -201,7 +193,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// IPv4 配置(上游 `NewV4Config`)。
+    /// IPv4 配置。
     pub fn new_v4(
         cache_policy: CachePolicy,
         xdb_content: Vec<u8>,
@@ -210,7 +202,7 @@ impl Config {
         Self::new(cache_policy, IpVersion::IPv4, xdb_content, searchers)
     }
 
-    /// IPv6 配置(上游 `NewV6Config`)。
+    /// IPv6 配置。
     pub fn new_v6(
         cache_policy: CachePolicy,
         xdb_content: Vec<u8>,
@@ -275,7 +267,7 @@ impl Config {
     }
 }
 
-/// 缓冲读取:越界或部分可读时返回上游的不完整读取错误。
+/// 缓冲读取:越界或部分可读时返回不完整读取错误。
 fn read_at(src: &[u8], offset: usize, buf: &mut [u8]) -> Result<(), String> {
     match src.get(offset..offset.wrapping_add(buf.len())) {
         Some(s) => {
@@ -289,8 +281,7 @@ fn read_at(src: &[u8], offset: usize, buf: &mut [u8]) -> Result<(), String> {
     }
 }
 
-/// IP 比较(上游 `Version.IPCompare`:IPv4 索引按小端存储,比较前
-/// 反转为大端——上游为原地交换,此处为等价的只读实现;IPv6 直接
+/// IP 比较(IPv4 索引按小端存储,比较前只读反转为大端;IPv6 直接
 /// 字节序比较)。
 fn ip_compare(version: IpVersion, ip1: &[u8], ip2: &[u8]) -> Ordering {
     match version {
@@ -302,24 +293,23 @@ fn ip_compare(version: IpVersion, ip1: &[u8], ip2: &[u8]) -> Ordering {
     }
 }
 
-/// xdb 查询器(上游 `xdb.Searcher`,非线程安全,经池串行借用)。
+/// xdb 查询器(非线程安全,经池串行借用)。
 pub struct Searcher {
     version: IpVersion,
-    /// 上游在每次查询前重置且从不递增,恒为 0。
+    /// 每次查询前重置且从不递增,恒为 0。
     io_count: i32,
     vector_index: Option<Vec<u8>>,
     content_buff: Option<Vec<u8>>,
 }
 
 impl Searcher {
-    /// 整文件驻留构造(上游 `xdb.NewWithBuffer`:上游签名带恒为
-    /// nil 的错误返回,此处保留)。
+    /// 整文件驻留构造。
     pub fn new_with_buffer(version: IpVersion, c_buff: Vec<u8>) -> Result<Self, String> {
         Self::new(version, None, Some(c_buff))
     }
 
-    /// 通用构造(上游 `xdb.NewSearcher`:整文件缓冲存在时向量
-    /// 索引副本被忽略;两者皆无时为上游文件句柄形态,查询读回全零)。
+    /// 通用构造(整文件缓冲存在时向量索引副本被忽略;两者皆无时
+    /// 不读取任何数据,查询读回全零)。
     pub fn new(
         version: IpVersion,
         v_index: Option<Vec<u8>>,
@@ -345,19 +335,18 @@ impl Searcher {
         self.version
     }
 
-    /// 上游 `GetIOCount`(恒为 0,见字段注释)。
+    /// IO 计数(恒为 0,见字段注释)。
     pub fn get_io_count(&self) -> i32 {
         self.io_count
     }
 
-    /// 解析 IP 字符串并查询(上游 `Searcher.SearchByStr`)。
+    /// 解析 IP 字符串并查询。
     pub fn search_by_str(&self, ip_str: &str) -> Result<String, String> {
         let ip = parse_ip_bytes(ip_str).ok_or_else(|| format!("invalid ip address: {ip_str}"))?;
         self.search(&ip)
     }
 
-    /// 查询(上游 `Searcher.Search`:经向量索引定位段索引范围,
-    /// 段索引二分命中后读取数据段)。
+    /// 查询(经向量索引定位段索引范围,段索引二分命中后读取数据段)。
     pub fn search(&self, ip: &[u8]) -> Result<String, String> {
         if ip.len() != self.version.bytes() {
             return Err(format!(
@@ -369,7 +358,7 @@ impl Searcher {
         let idx = ip[0] as usize * VECTOR_INDEX_COLS * VECTOR_INDEX_SIZE
             + ip[1] as usize * VECTOR_INDEX_SIZE;
         // 向量索引读取:优先预载副本,其次整文件缓冲;两者皆无时
-        // 读回全零(上游文件句柄分支的零值行为)
+        // 不读取,保持全零
         let mut vec = [0u8; 8];
         let src = self
             .vector_index
@@ -428,8 +417,7 @@ impl Searcher {
         Ok(String::from_utf8_lossy(&region_buff).into_owned())
     }
 
-    /// 上游 `Searcher.read`:仅整文件缓冲存在时读取;无缓冲分支
-    /// (上游读文件)读回全零。
+    /// 读取:仅整文件缓冲存在时读取;无缓冲时不读取,缓冲保持全零。
     fn read(&self, offset: usize, buff: &mut [u8]) -> Result<(), String> {
         match &self.content_buff {
             Some(c) => read_at(c, offset, buff),
@@ -438,8 +426,7 @@ impl Searcher {
     }
 }
 
-/// 查询器池(上游 `ip2region.SearcherPool`:Go channel 池改为
-/// `Mutex`+`Condvar` 的阻塞借还)。
+/// 查询器池(`Mutex`+`Condvar` 实现的阻塞借还,池空时等待)。
 pub struct SearcherPool {
     searchers: Mutex<VecDeque<Searcher>>,
     cond: Condvar,
@@ -447,7 +434,7 @@ pub struct SearcherPool {
 }
 
 impl SearcherPool {
-    /// 构造并填满池(上游 `NewSearcherPool`)。
+    /// 构造并填满池。
     pub fn new(config: &Config) -> Result<Self, String> {
         if config.searchers < 1 {
             return Err("config.searchers must > 0".to_string());
@@ -465,8 +452,7 @@ impl SearcherPool {
         })
     }
 
-    /// 借出一个查询器执行 `f`,用毕归还(上游 `BorrowSearcher` +
-    /// `ReturnSearcher`:池空时阻塞等待)。
+    /// 借出一个查询器执行 `f`,用毕归还(池空时阻塞等待)。
     pub fn with_searcher<R>(&self, f: impl FnOnce(&Searcher) -> R) -> R {
         let mut guard = self.searchers.lock().unwrap_or_else(|e| e.into_inner());
         while guard.is_empty() {
@@ -486,15 +472,14 @@ impl SearcherPool {
         result
     }
 
-    /// 当前借出数(上游 `LoanCount`)。
+    /// 当前借出数。
     pub fn loan_count(&self) -> i32 {
         self.loan_count.load(AtomicOrdering::SeqCst)
     }
 }
 
-/// 双栈查询服务(上游 `ip2region.Ip2Region`:对应版本被禁用时
-/// 查询返回空串)。BufferCache 走免池的整文件驻留查询器,
-/// 其余策略走查询器池。
+/// 双栈查询服务(对应版本被禁用时查询返回空串)。BufferCache 走
+/// 免池的整文件驻留查询器,其余策略走查询器池。
 pub struct Ip2Region {
     v4_pool: Option<SearcherPool>,
     v4_in_mem_searcher: Option<Searcher>,
@@ -503,7 +488,7 @@ pub struct Ip2Region {
 }
 
 impl Ip2Region {
-    /// 以两个版本配置创建,`None` 禁用对应版本(上游 `NewIp2Region`)。
+    /// 以两个版本配置创建,`None` 禁用对应版本。
     pub fn new(v4_config: Option<Config>, v6_config: Option<Config>) -> Result<Self, String> {
         let (v4_pool, v4_in_mem_searcher) = match v4_config {
             None => (None, None),
@@ -527,7 +512,7 @@ impl Ip2Region {
             }
             Some(c) => {
                 let pool = SearcherPool::new(&c).map_err(|e| {
-                    // "memeory" 为上游原文拼写
+                    // "memeory" 为该错误文案的固定拼写
                     format!("failed to create v6 in-memeory searcher pool: {e}")
                 })?;
                 (Some(pool), None)
@@ -541,14 +526,14 @@ impl Ip2Region {
         })
     }
 
-    /// 解析 IP 字符串并按字节长度分派(上游 `SearchByStr`/`Search`)。
+    /// 解析 IP 字符串并按字节长度分派。
     pub fn search_by_str(&self, ip_str: &str) -> Result<String, String> {
         let ip_bytes =
             parse_ip_bytes(ip_str).ok_or_else(|| format!("invalid ip address: {ip_str}"))?;
         self.search(&ip_bytes)
     }
 
-    /// 按字节数分派:4 字节走 IPv4,16 字节走 IPv6(上游 `Search`)。
+    /// 按字节数分派:4 字节走 IPv4,16 字节走 IPv6。
     pub fn search(&self, ip_bytes: &[u8]) -> Result<String, String> {
         match ip_bytes.len() {
             4 => self.v4_search(ip_bytes),
@@ -562,7 +547,7 @@ impl Ip2Region {
             return searcher.search(ip_bytes);
         }
         let Some(pool) = &self.v4_pool else {
-            // 上游:IPv4 查询被禁用时返回空串
+            // IPv4 查询被禁用时返回空串
             return Ok(String::new());
         };
         pool.with_searcher(|searcher| searcher.search(ip_bytes))
@@ -573,16 +558,15 @@ impl Ip2Region {
             return searcher.search(ip_bytes);
         }
         let Some(pool) = &self.v6_pool else {
-            // 上游:IPv6 查询被禁用时返回空串
+            // IPv6 查询被禁用时返回空串
             return Ok(String::new());
         };
         pool.with_searcher(|searcher| searcher.search(ip_bytes))
     }
 }
 
-/// 便捷客户端(上游 `ip2region.Client`:上游以硬编码的向量索引
-/// 缓存策略与 20 个查询器从内嵌数据构造;此处由调用方传入两版
-/// 数据,`None` 禁用对应版本)。
+/// 便捷客户端(默认采用向量索引缓存策略与 20 个查询器;由调用方
+/// 传入两版数据,`None` 禁用对应版本)。
 pub struct Client {
     ip2region: Ip2Region,
 }
@@ -608,16 +592,15 @@ impl Client {
         Ok(Self { ip2region })
     }
 
-    /// 以显式配置创建(上游没有对应构造,供需要非默认策略的调用方使用)。
+    /// 以显式配置创建(供需要非默认策略的调用方使用)。
     pub fn with_configs(v4: Option<Config>, v6: Option<Config>) -> Result<Self, String> {
         let ip2region = Ip2Region::new(v4, v6)
             .map_err(|e| format!("failed to create ip2region service: {e}"))?;
         Ok(Self { ip2region })
     }
 
-    /// 归属地查询(上游 `Client.Query`:地域串按 `|` 恰好切出四段时
-    /// 依次填入国家/省/市/ISP,其余一律视为非法数据;结果 `ip`
-    /// 字段上游不赋值,保持为空串)。
+    /// 归属地查询(地域串按 `|` 恰好切出四段时依次填入国家/省/
+    /// 市/ISP,其余一律视为非法数据;结果 `ip` 字段保持为空串)。
     pub fn query(&self, raw_ip: &str) -> Result<GeoResult, String> {
         let region_data = self.ip2region.search_by_str(raw_ip)?;
         let parts: Vec<&str> = region_data.split('|').collect();
@@ -717,7 +700,7 @@ mod tests {
         // 段首/段末含端
         assert_eq!(svc.search_by_str("1.2.255.255").unwrap(), "A1|A2|A3|A4");
         assert_eq!(svc.search_by_str("1.3.0.0").unwrap(), "B1|B2|B3|B4");
-        // IPv4 映射形态按上游 To4 折叠
+        // IPv4 映射形态折叠为 4 字节
         assert_eq!(svc.search_by_str("::ffff:1.2.0.5").unwrap(), "A1|A2|A3|A4");
         // 低于首段/段间空隙/命中表项但无覆盖段 → 未命中
         assert_eq!(svc.search_by_str("1.1.255.254").unwrap(), "");
@@ -738,7 +721,7 @@ mod tests {
             svc.search_by_str("1.2.3.4.5").unwrap_err(),
             "invalid ip address: 1.2.3.4.5"
         );
-        // 字节数组分派(上游 Search)
+        // 字节数组分派
         assert_eq!(svc.search(&[1, 2, 0, 5]).unwrap(), "A1|A2|A3|A4");
         assert_eq!(svc.search(&[0u8; 16]).unwrap(), "");
         assert_eq!(
@@ -768,10 +751,10 @@ mod tests {
 
     #[test]
     fn ip2region_client_query() {
-        // 上游 NewClient 硬编码 VIndexCache/20;此处两版数据都提供
+        // Client::new 采用默认的 VIndexCache 策略与 20 个查询器
         let client = Client::new(Some(build_v4_fixture()), Some(build_v6_fixture())).unwrap();
         let r = client.query("1.2.0.5").unwrap();
-        assert_eq!(r.ip, ""); // 上游不赋值
+        assert_eq!(r.ip, ""); // ip 字段恒为空串
         assert_eq!(r.country, "A1");
         assert_eq!(r.province, "A2");
         assert_eq!(r.city, "A3");
@@ -781,7 +764,7 @@ mod tests {
         assert_eq!(r.province, "C2");
         assert_eq!(r.city, "C3");
         assert_eq!(r.isp, "C4");
-        // 未命中的空地域串按上游视为非法数据
+        // 未命中的空地域串视为非法数据
         assert_eq!(
             client.query("9.9.9.9").unwrap_err(),
             "invalid region data: "
@@ -825,7 +808,7 @@ mod tests {
             "ip version mismatch, xdb version={id:4, name:IPv4, bytes:4, segment_index_size:14}, expected={id:6, name:IPv6, bytes:16, segment_index_size:38}"
         );
 
-        // version=1:上游此分支的错误文案取 IP 版本字段的值
+        // version=1:错误文案取 IP 版本字段的值
         let mut db = build_v4_fixture();
         db[0..2].copy_from_slice(&1u16.to_le_bytes());
         db[16..18].copy_from_slice(&9u16.to_le_bytes());
@@ -845,7 +828,7 @@ mod tests {
 
     #[test]
     fn ip2region_short_buffers() {
-        // 头装载要求 256 字节(上游此处为切片 panic)
+        // 头装载要求 256 字节,短缓冲返回错误
         assert_eq!(
             Config::new_v4(CachePolicy::NoCache, vec![0u8; 200], 1).unwrap_err(),
             "buffer too small: need 256 bytes, got 200"

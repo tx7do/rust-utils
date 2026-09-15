@@ -1,4 +1,4 @@
-//! Django 风格的过滤/排序查询语法解析(移植自 go-utils/query_parser)。
+//! Django 风格的过滤/排序查询语法解析。
 //!
 //! 支持两种过滤形式,通过回调逐条产出 `(field, operator, value)`:
 //!
@@ -120,7 +120,7 @@ where
 
     match serde_json::from_str::<HashMap<String, String>>(query) {
         Ok(map) => {
-            // Go 版依赖 map 遍历(顺序随机),这里排序保证确定性。
+            // 对键排序,保证输出顺序确定。
             let mut keys: Vec<&String> = map.keys().collect();
             keys.sort();
             for k in keys {
@@ -344,7 +344,7 @@ mod tests {
         let got = collect_query_string("name__exact:%E5%BC%A0%E4%B8%89,a+b__exact:x%2Cy");
         assert_eq!(got[0].2, "张三");
         // 逗号需要被编码,否则会被当作键值对分隔符
-        assert_eq!(got[1].0, "a_b"); // 字段名会再做一次 snake_case(与 Go 一致)
+        assert_eq!(got[1].0, "a_b"); // 字段名会再做一次 snake_case
         assert_eq!(got[1].2, "x,y");
     }
 
@@ -427,7 +427,7 @@ mod tests {
     #[cfg(feature = "json")]
     fn test_parse_filter_json_string_invalid() {
         assert!(parse_filter_json_string("not-json", |_, _, _| {}).is_err());
-        // 数字值不匹配 map[string]string,回退数组也失败 → 报错
+        // 数字值无法反序列化为字符串映射,回退数组也失败 → 报错
         assert!(parse_filter_json_string(r#"{"age":18}"#, |_, _, _| {}).is_err());
     }
 

@@ -1,4 +1,4 @@
-//! 随机数工具箱(移植自 go-utils/rand 的常用子集),feature `rand`。
+//! 随机数工具箱,feature `rand`。
 //!
 //! 提供可种子化的 [`Randomizer`](带 `StdRng` 后端)以及直接使用线程
 //! 随机源的自由函数。包含:基本类型、区间、加权选择、别名表(Alias

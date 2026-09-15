@@ -1,4 +1,4 @@
-//! 分页偏移量计算(移植自 go-utils/pagination)。
+//! 分页偏移量计算。
 
 /// 默认页码。
 pub const DEFAULT_PAGE: i32 = 1;

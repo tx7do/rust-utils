@@ -1,8 +1,7 @@
-//! 对称加密与哈希原语(移植自 go-utils/crypto 的 AES/HMAC/SHA 部分),
-//! feature `crypto`。
+//! 对称加密与哈希原语,feature `crypto`。
 //!
-//! RSA / ECDSA / SM2/SM3/SM4 未移植;如需可接 RustCrypto 的
-//! `rsa` / `p256` 等crate。
+//! 覆盖 AES-CBC / AES-GCM / HMAC-SHA256 / SHA-2 / RSA / ECDSA / ECDH;
+//! 国密 SM2/SM3/SM4 由 `sm` 模块(feature `sm`)提供。
 //!
 //! ```
 //! use rust_utils::crypto::{AesGcmCipher, Cipher};
@@ -49,10 +48,10 @@ pub fn from_hex(s: &str) -> Result<Vec<u8>, String> {
 }
 
 // ---------------------------------------------------------------------------
-// PKCS#7(Go 语境下的 "PKCS5")填充
+// PKCS#7 填充
 // ---------------------------------------------------------------------------
 
-/// PKCS#7 填充(Go 版接口名为 PKCS5Padding,块大小由调用方给定)。
+/// PKCS#7 填充(块大小由调用方给定)。
 pub fn pkcs5_padding(plaintext: &[u8], block_size: usize) -> Vec<u8> {
     let pad = block_size - plaintext.len() % block_size;
     let mut out = plaintext.to_vec();
@@ -307,7 +306,7 @@ impl RsaCipher {
             .map_err(|e| format!("rsa decrypt failed: {e}"))
     }
 
-    /// 导出私钥 PKCS#1 PEM(`RSA PRIVATE KEY`,与 Go 版一致)。
+    /// 导出私钥 PKCS#1 PEM(`RSA PRIVATE KEY` 标签)。
     pub fn export_private_key_pem(&self) -> Result<String, String> {
         use rsa::pkcs1::EncodeRsaPrivateKey as _;
         self.private
@@ -316,8 +315,7 @@ impl RsaCipher {
             .map_err(|e| format!("export private key failed: {e}"))
     }
 
-    /// 导出公钥 SPKI PEM。字节内容与 Go 版一致;
-    /// PEM 标签改写为 `RSA PUBLIC KEY` 以对齐 Go 版输出。
+    /// 导出公钥 SPKI PEM(PEM 标签改写为 `RSA PUBLIC KEY`)。
     pub fn export_public_key_pem(&self) -> Result<String, String> {
         use rsa::pkcs8::EncodePublicKey as _;
         let pub_key = rsa::RsaPublicKey::from(&self.private);
@@ -337,7 +335,7 @@ impl RsaCipher {
 }
 
 // ---------------------------------------------------------------------------
-// ECDSA P-256(签名/验签,输出格式与 Go 版兼容:`base64(r)$base64(s)`)
+// ECDSA P-256(签名/验签,签名为 `base64(r)$base64(s)` 格式)
 // ---------------------------------------------------------------------------
 
 /// ECDSA P-256 数字签名。
@@ -358,8 +356,7 @@ impl EcdsaCipher {
         Ok(EcdsaCipher { signing })
     }
 
-    /// 签名,输出 `base64(r)$base64(s)`(r/s 固定 32 字节;
-    /// 兼容 Go 版的去零变长格式,反之亦然)。
+    /// 签名,输出 `base64(r)$base64(s)`(r/s 固定 32 字节)。
     pub fn sign(&self, data: &[u8]) -> String {
         use p256::ecdsa::signature::Signer;
         let sig: p256::ecdsa::Signature = self.signing.sign(data);
@@ -367,7 +364,7 @@ impl EcdsaCipher {
         format!("{}${}", to_base64(&bytes[..32]), to_base64(&bytes[32..]))
     }
 
-    /// 验签;接受本库固定 32 字节格式与 Go 版去零变长格式。
+    /// 验签;r/s 分量不足 32 字节时左侧补零,故去零的变长格式同样接受。
     pub fn verify(&self, data: &[u8], signature: &str) -> Result<bool, String> {
         use p256::ecdsa::signature::Verifier;
         let parts: Vec<&str> = signature.split('$').collect();
@@ -386,7 +383,6 @@ impl EcdsaCipher {
     }
 
     /// 公钥 SEC1 非压缩编码(65 字节,`04 || X || Y`)。
-    /// 注:Go 版此处输出非标准的 ASN.1 结构体编码,这里改为标准 SEC1。
     pub fn public_key_bytes(&self) -> Vec<u8> {
         self.signing
             .verifying_key()
@@ -432,7 +428,7 @@ impl EcdhCipher {
         Ok(EcdhCipher { secret })
     }
 
-    /// 本方公钥 SEC1 非压缩编码(65 字节,与 Go 版 `PublicKeyBytes()` 兼容)。
+    /// 本方公钥 SEC1 非压缩编码(65 字节)。
     pub fn public_key_bytes(&self) -> Vec<u8> {
         use p256::elliptic_curve::sec1::ToEncodedPoint as _;
         self.secret
@@ -442,8 +438,7 @@ impl EcdhCipher {
             .to_vec()
     }
 
-    /// 用对端公钥推导共享密钥(32 字节,即共享点的 X 坐标;
-    /// 注意 Go 版返回去前导零的变长字节,这里固定 32 字节)。
+    /// 用对端公钥推导共享密钥(固定 32 字节,即共享点的 X 坐标)。
     pub fn derive_shared_secret(&self, peer_pub_bytes: &[u8]) -> Result<Vec<u8>, String> {
         use p256::elliptic_curve::sec1::FromEncodedPoint as _;
         let point = p256::EncodedPoint::from_bytes(peer_pub_bytes)

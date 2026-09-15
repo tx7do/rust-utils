@@ -1,8 +1,12 @@
 # rust-utils
 
-从 [tx7do/go-utils](https://github.com/tx7do/go-utils) 移植而来的 Rust 工具箱:命名风格转换、切片/映射辅助、雪花 ID、订单号、查询条件解析、MySQL DDL 解析、优先级事件循环、数据回填、密码哈希、AES/HMAC、JWT、随机昵称生成、银行卡 BIN 查询等。
+Rust 工具箱:命名风格转换、切片/映射辅助、雪花 ID、订单号、查询条件解析、MySQL DDL 解析、优先级事件循环、数据回填、密码哈希、AES/HMAC、JWT、随机昵称生成、银行卡 BIN 查询、图形验证码、IP 归属地、机器翻译、分布式锁、国密等。
 
-设计原则:**核心模块零依赖**(只依赖 `std`),重依赖的能力(时间、随机、加密、JWT 等)通过 feature 按需启用;全 crate `#![forbid(unsafe_code)]`。
+设计原则:
+
+- **核心模块零依赖**(只依赖 `std`),重依赖的能力(时间、随机、加密、JWT 等)通过 feature 按需启用;
+- 全 crate `#![forbid(unsafe_code)]`;
+- 边界读取(geoip、ddl_parser 等)对越界与畸形输入一律返回错误或空结果,不做 panic。
 
 ## 使用
 
@@ -17,37 +21,38 @@ rust-utils = "0.1"
 
 ## 模块一览
 
-| Rust 模块 | 对应 Go 包 | feature | 说明 |
-|---|---|---|---|
-| [`byteutil`] | byteutil | 默认 | 整数/字节互转、ASCII 大小写 |
-| [`stringcase`] | stringcase | 默认 | 驼峰/蛇形/烤肉串转换,识别缩写词与数字段 |
-| [`sliceutil`] | sliceutil | 默认 | 查找族、交集/差集/并集、去重、分块 |
-| [`maputil`] | maputils | 默认 | keys/values/merge/drop/filter |
-| [`mathutil`] | math | 默认 | 统计量、手写正态分布(Gaussian)、Erfc/Ierfc |
-| [`pagination`] | pagination | 默认 | 分页偏移量 |
-| [`cryptocurrency`] | cryptocurrency | 默认 | 加密货币钱包地址格式校验 |
-| [`query_parser`] | query_parser | `json`(JSON 形式需要) | Django 风格 `field__op` 过滤/排序解析 |
-| [`ddl_parser`] | ddl_parser | 默认 | MySQL `CREATE TABLE` 解析(手写词法,零依赖) |
-| [`eventloop`] | eventloop | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
-| [`aggregator`] | aggregator | 默认 | 关联数据回填(列表/树)+ 并行执行器 |
-| [`id`] | id | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
-| [`fsutil`] | ioutil | 默认(`glob` 可选) | 文件/路径辅助 |
-| [`dateutil`] | dateutil | `chrono` | 日粒度取整、区间判断 |
-| [`timeutil`] | timeutil | `chrono` | 今天/昨天/本月/上月区间、时间差、格式转换 |
-| [`random`] | rand | `rand` | 随机工具:加权/别名表/骰子/抖动/正态/手机号等 |
-| [`name_generator`] | name_generator | `name-generator` | 随机昵称与中英日姓名(内嵌 2.5 MB 词库) |
-| [`slug`] | slug | `slug` | URL slug(unicode 转写) |
-| [`password`] | password | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 |
-| [`crypto`] | crypto | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充 |
-| [`jwt`] | jwtutil | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
-| [`bank_card`] | bank_card | `bank-card` | Luhn 校验 + BIN 查询(内嵌 2013 条记录) |
-| [`captcha`] | captcha | `captcha` | 图形验证码:数字/字母/算术/中文四类文本驱动 + 滑块/点选/旋转,自绘渲染,输出 JSON 与上游同构,存储层可插拔(`captcha-redis` 提供 Redis 落地) |
-| [`fieldmask`] | fieldmaskutil | `fieldmask` | 字段掩码:嵌套掩码树构建 + filter/prune/overwrite/validate/路径归一化(语义移植到 `serde_json::Value` 上) |
-| [`tls`] | tls | `tls` | TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
-| [`geoip`] | geoip | `geoip` | IP 归属地查询三后端:qqwry(GB18030、字段重定向链、省/市切分)、ip2region xdb v2(向量索引+段索引二分、查询器池)、MaxMind mmdb 读取器;数据由调用方加载 |
-| [`translator`] | translator | `translator` | 翻译器四后端:百度(MD5 签名)/阿里(RPC 签名)/谷歌(v1 裸端点、v2/v3 REST 等价)/火山(HMAC-SHA256 派生链);请求构造与签名可离线验证 |
-| [`distlock`] | distlock | `distlock` | 分布式锁:Locker/Lock 抽象与获取选项(Redis 落地用 `distlock-redis`,按 bsm/redislock 协议逐式复刻;etcd 后端未移植) |
-| [`sm`] | crypto(SM 部分) | `sm` | 国密 SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/SM4-CBC |
+| 模块 | feature | 说明 |
+|---|---|---|
+| [`byteutil`] | 默认 | 整数/字节互转、ASCII 大小写 |
+| [`stringcase`] | 默认 | 驼峰/蛇形/烤肉串转换,识别缩写词与数字段 |
+| [`stringutil`] | 默认 | 宽松数值/布尔解析、JSON 字段值重写 |
+| [`sliceutil`] | 默认 | 查找族、交集/差集/并集、去重、分块 |
+| [`maputil`] | 默认 | keys/values/merge/drop/filter |
+| [`mathutil`] | 默认 | 统计量、手写正态分布(Gaussian)、Erfc/Ierfc |
+| [`pagination`] | 默认 | 分页偏移量 |
+| [`cryptocurrency`] | 默认 | 加密货币钱包地址格式校验 |
+| [`query_parser`] | `json`(JSON 形式需要) | Django 风格 `field__op` 过滤/排序解析 |
+| [`ddl_parser`] | 默认 | MySQL `CREATE TABLE` 解析(手写词法,零依赖) |
+| [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
+| [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
+| [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
+| [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
+| [`dateutil`] | `chrono` | 日粒度取整、区间判断 |
+| [`timeutil`] | `chrono` | 今天/昨天/本月/上月区间、时间差、格式转换 |
+| [`random`] | `rand` | 随机工具:加权/别名表/骰子/抖动/正态/手机号等 |
+| [`name_generator`] | `name-generator` | 随机昵称与中英日姓名(内嵌 2.5 MB 词库) |
+| [`slug`] | `slug` | URL slug(unicode 转写) |
+| [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 |
+| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充 |
+| [`jwt`] | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
+| [`bank_card`] | `bank-card` | Luhn 校验 + BIN 查询(内嵌 2013 条记录) |
+| [`captcha`] | `captcha` | 图形验证码:数字/字母/算术/中文四类文本驱动 + 滑块/点选/旋转,自绘渲染,输出 JSON 与 base64Captcha 前端组件兼容,存储层可插拔(`captcha-redis` 提供 Redis 落地) |
+| [`fieldmask`] | `fieldmask` | 字段掩码:嵌套掩码树构建 + filter/prune/overwrite/validate/路径归一化,作用于 `serde_json::Value` |
+| [`tls`] | `tls` | TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
+| [`geoip`] | `geoip` | IP 归属地查询三后端:qqwry(GB18030、省/市切分)、ip2region xdb v2(向量索引+段索引二分、查询器池)、MaxMind mmdb 读取器;数据文件由调用方加载 |
+| [`translator`] | `translator` | 翻译器四后端:百度(MD5 签名)/阿里(RPC 签名)/谷歌(v1 裸端点、v2/v3 REST)/火山(HMAC-SHA256 派生链);单次请求不自动重试,请求构造与签名可离线验证 |
+| [`distlock`] | `distlock` | 分布式锁:Locker/Lock 抽象与获取选项(Redis 落地用 `distlock-redis`,兼容 bsm/redislock 线上协议;暂未提供 etcd 后端) |
+| [`sm`] | `sm` | 国密 SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/SM4-CBC |
 
 [`byteutil`]: src/byteutil.rs
 [`stringcase`]: src/stringcase.rs
@@ -194,17 +199,18 @@ assert!(algo.verify("s3cret!", &hash).unwrap());
 
 ### 验证码服务
 
-七种驱动(数字/字母/算术/中文四类文本 + 滑块/点选/旋转)与 Go 版
-一一对应,配置面、输出 JSON 结构、验证容差对齐;渲染为程序自绘
-(字形资产说明见 `assets/captcha/README.md`)。
+七种驱动:数字/字母/算术/中文四类文本驱动,加滑块/点选/旋转三类
+交互驱动;渲染为程序自绘,不依赖外部图片素材(字形资产说明见
+`assets/captcha/README.md`)。文本驱动返回 PNG 数据 URI,交互驱动
+返回 JSON,结构与 base64Captcha 前端组件一致。
 
 ```rust
 use rust_utils::captcha::{Captcha, Config, DriverKind};
 
 let cap = Captcha::with_config(Config::with_driver(DriverKind::Digit));
 let (id, b64, answer) = cap.generate().unwrap();
-// 文本驱动返回 PNG 数据 URI;滑块/点选/旋转驱动返回
-// 与上游同构的 JSON(内嵌 JPEG 主图 / PNG 缩略图)
+// 文本驱动返回 PNG 数据 URI;滑块/点选/旋转驱动返回 JSON
+// (内嵌 JPEG 主图 / PNG 缩略图)
 assert!(b64.starts_with("data:image/png;base64,"));
 assert!(cap.verify(&id, &answer).unwrap()); // 一次性校验
 ```
@@ -230,111 +236,6 @@ assert_eq!(got[&2].as_ref(), &20);
 loader.load_many(&[2, 3]); // 全部命中缓存,不再取数
 assert_eq!(calls.load(Ordering::Relaxed), 1);
 ```
-
-## 与 Go 版的差异
-
-未移植的 Go 包及原因:
-
-| Go 包 | 原因 |
-|---|---|
-| `trans`(指针助手) | Rust 的 `Option<T>` 天然覆盖 |
-| `copierutil` / `mapper` / `structutil` | 基于 Go 反射,在 Rust 中应改用 serde/prost 方案 |
-| `code_generator` | Go `text/template` 生态专属 |
-
-行为修正(相对 Go 版的 bug):
-
-- `sliceutil` 的 `FindLastIndex`/`FindLastIndexOf` 在 Go 里永远检查不到下标 0,已修正;
-- `ddl_parser` 的 `--` 行注释在 Go 里只会删掉最后一行(正则未开多行模式),已改为标准的"删到行尾";
-- `cryptocurrency` 的 XMR 正则多了一个前导 `/`(导致永远匹配不上)、TRC 正则未加锚点,均已修正;
-- `aggregator` 的并行执行器重试语义在 Rust 中要求任务可重复调用(`Fn`);
-- `id::protected_id` / `new_xid` / `new_sonyflake_id` 中机器标识来源由 Go 版的内网 IP 改为进程内随机/进程 ID(std 无对应 API);
-- `crypto::EcdsaCipher::public_key_bytes` 由 Go 版的非标准 ASN.1 结构体改为标准 SEC1 非压缩编码;
-- 上游 gmsm 的 `CipherUnmarshal` 对 X/Y 不做 32 字节前导补零(概率性产生短 C1 导致解密错位),Rust 版补齐。
-- 上游 `qqwry` 的 `Query` 以 `len(area)`(引用了尚未赋值的变量,恒为 0)推进运营商字段位置,Rust 版按读出的国家串长度修正;
-- 上游 `qqwry` 的 `locateIP` 对单条目(startPos==endPos)与未按条目对齐的索引区间在未命中条目起始 IP 时死循环,Rust 版按未找到返回(命中条目起始 IP 的返回保持原行为)。
-
-`captcha` 的固有差异(上游因素材缺失不可用的部分,本库以程序生成素材
-实现同构管线):
-
-- 滑块/点选的背景为 wrapper 同款渐变公式,点选字形为内嵌 GNU Unifont
-  位图子集、干扰图元逐式移植自上游,旋转驱动的圆盘为径向图案替身
-  (字形素材及其许可见 `assets/captcha/README.md`);数字驱动内置的
-  11×18 点阵与 dchest/base64Captcha 逐字节一致(Apache-2.0);
-- 上游 `rotate` builder 不读 wrapper 的 `RotateConfig`(恒用上游默认
-  常量 220×220、缩略 {140,150,160,170}、角度 [30,330]),Rust 版
-  保持同一行为,该配置字段惰性;
-- 上游点选验证把期望答案序列化为 JSON 对象、而其自身按数组解析,
-  恒为失败;Rust 版将同数据存为数组,使逐点 ±10px 的原验证语义可用。
-
-`geoip` 的固有差异:
-
-- 三个后端的数据文件(qqwry.dat、ip2region xdb、GeoLite2 mmdb)
-  不再 `go:embed`,各构造函数改为接收字节序列,由调用方自行加载;
-- 越界读取由 Go 的切片 panic 改为返回错误/零偏移/空串,含 xdb
-  头与向量索引的长度校验(上游为固定切片 panic);
-- `qqwry` 的 `SpiltAddress` 正则以字面交替匹配等价实现(含 `.`
-  不匹配换行的语义);`ip2region` 的地域字节串按 UTF-8 有损转为
-  `String`(上游 `string()` 接受任意字节;真实 xdb 地域串为
-  UTF-8,仅畸形数据受影响),Go channel 查询器池改为
-  `Mutex`+`Condvar`;
-- `geolite` 查询失败由上游 `log.Fatal`(直接杀进程)改为返回
-  错误;
-- 未移植:各查询器与池的 `Close`/`CloseTimeout`(查询器不持有
-  需要关闭的资源,上游 `Searcher.Close` 本为空操作)、
-  `Header`/`Config` 的 `String()`、以及 `VersionFromIP`/
-  `IP2String`/`IPAddOne`/`IPSubOne` 等 go-utils 未调用的
-   xdb 工具函数。
-
-`translator` 的固有差异:
-
-- 四后端均为单次请求:上游各官方 SDK 的重试/退避与内部错误对象
-  未移植,错误一律为字符串(`google` v2/v3 的错误文案为客户端库
-  行为的近似);上游 `google` 的 `language.Parse` BCP47 校验未
-  移植,语言标签原样透传;其 `encodeURI` 实为
-  `url.QueryEscape`(注释与实现不符),按实现语义移植;
-- `google` v2/v3 为上游官方客户端库的 REST 线上形态的等价实现
-  (v2 丢弃源语言参数、响应键名按公开 API 文档;v3 上游从不
-  设置 parent,空父路径下由服务端报错);
-- `alibaba` 的 `SignatureNonce` 上游为杂凑值的 32 位十六进制,
-  此处取 UUID v4 的 32 位十六进制(唯一性等价);上游的请求调试
-  打印(含凭据与签名头,`volc` 同)未移植;`volc` 的 `Host` 头由
-  HTTP 客户端按 URL 自动设置(上游显式设置,值相同);
-- 各响应解析中的越界访问(上游切片索引 panic)一律返回错误;
-  请求构造与签名按上游算法逐式复刻,并附金标测试(`alibaba` 为
-  SDK 自带测试向量、`volc` 为独立预计算的签名链输出、`baidu`
-  为独立预计算的 MD5)。
-
-`distlock` 的固有差异:
-
-- etcd locker 未移植(jetcd 的 concurrency 包——session/mutex——在
-  Rust 生态无对应,`etcd-client` 不提供锁抽象,不为此引入重依赖);
-  上游 etcd 路径消费的 `LockOption`(blockWait/maxWaitTime/retryDelay
-  的轮询等待)随之无宿主,选项类型保留在接口签名中,Redis 后端与
-  上游一样忽略它们;
-- 错误以字符串返回;上游的 `ErrNotObtained` 哨兵为
-  `distlock::ERR_NOT_OBTAINED`,按字符串相等判断(上游用
-  `errors.Is`);
-- Redis 后端的线上协议按 bsm/redislock v0.9.4 逐式复刻,其未被上游
-  包装层使用的部分(TTL 查询、`Metadata`/`Token` 自定义选项、
-  `NoRetry`/`ExponentialBackoff` 策略)未移植;
-- 上游 `Obtain` 以调用方 ctx 的 deadline 兜底重试循环,此处固定以
-  锁 TTL 为期限;
-- 上游 `StartRefresh` 返回的 stop 未被调用时,续期协程在无失败的
-  情况下永不退出;Rust 版 `StopHandle` 被丢弃即视作停止(信道断开,
-  线程退出)。
-
-`tls` 与 `fieldmask` 的固有差异:
-
-- `tls` 返回 rustls 的 `ServerConfig`/`ClientConfig` 而非 Go 的
-  `*tls.Config`;`insecure_skip_verify` 参数保留但为空操作(上游
-  把它设在服务端配置上,该字段本就只对客户端验证生效);系统根
-  信任由 `rustls-native-certs` 加载;
-- `fieldmask` 把上游基于 proto 反射的掩码语义移植到
-  `serde_json::Value` 上:JSON 对象同时对应 proto 的普通字段与
-  map 字段,统一采用上游普通字段分支的保守语义(上游 map 分支
-  对掩码内标量更激进,见模块文档);`Validate` 以模板 JSON 对象
- 充当消息描述符;`fieldmaskpb.FieldMask` 包装与字段号→路径
-  转换为 proto 专属,未移植。
 
 ## 开发
 

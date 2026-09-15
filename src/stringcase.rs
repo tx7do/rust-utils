@@ -1,5 +1,5 @@
 //! 命名风格转换:驼峰 / 蛇形 / 烤肉串,附带一个能识别缩写词与数字段的
-//! 自定义分词器(移植自 go-utils/stringcase)。
+//! 自定义分词器。
 //!
 //! 与 `heck` 等现成 crate 的区别在于对缩写词与数字的处理:
 //! `HTTPStatusCode` → `http_status_code`、`Numbers123Test` → `numbers123_test`、
@@ -33,7 +33,7 @@ fn is_letter(c: char) -> bool {
     c.is_alphabetic()
 }
 
-/// 逐字符读取 "CamelCase" 字符串的读取器,移植自 Go 版的 `rdr`。
+/// 逐字符读取 "CamelCase" 字符串的读取器。
 /// `pos` 始终指向"下一个待读字符";`rd` 为上一个已读字符,`nxt` 为前瞻字符。
 struct Rdr<'a> {
     input: &'a [char],
@@ -235,7 +235,7 @@ fn is_digits_only(s: &str) -> bool {
     !s.is_empty() && s.chars().all(is_digit)
 }
 
-/// 与 Go 版一致:相邻两个词若在原输入里位置相接,且前词纯字母、后词纯数字,
+/// 相邻两个词若在原输入里位置相接,且前词纯字母、后词纯数字,
 /// 则合并(`numbers123` 不被拆开)。
 fn merge_adjacent_digit_words(input: &str, words: Vec<String>) -> Vec<String> {
     let mut merged: Vec<String> = Vec::with_capacity(words.len());
@@ -710,7 +710,7 @@ mod tests {
         // noSplit 的词从词首匹配时保护整词不被拆分
         let result = split_with("HTTPStatusCode", &["StatusCode"]);
         assert_eq!(result, vec!["HTTP", "StatusCode"]);
-        // 不从词首开始时,无保护效果(与 Go 版一致)
+        // 不从词首开始时,无保护效果
         let result2 = split_with("HTTPStatusCode", &["Status"]);
         assert_eq!(result2, vec!["HTTP", "Status", "Code"]);
     }

@@ -1,4 +1,4 @@
-//! 整数与字节的互转,以及 ASCII 字节大小写翻转(移植自 go-utils/byteutil)。
+//! 整数与字节的互转,以及 ASCII 字节大小写翻转。
 
 /// 将 `i64` 转为 8 字节大端表示。
 pub fn int_to_bytes(n: i64) -> [u8; 8] {

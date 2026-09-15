@@ -1,4 +1,4 @@
-//! TLS 证书加载(对应 Go 版 `tls` 包,feature `tls`)。
+//! TLS 证书加载,feature `tls`。
 //!
 //! 从 PEM 文件或字节序列组装 rustls 的
 //! [`ServerConfig`]/[`ClientConfig`]:
@@ -7,17 +7,15 @@
 //!   提供 CA 时为双向认证(`WebPkiClientVerifier`),否则单向
 //!   (`with_no_client_auth`)。
 //! - 客户端(`load_client_tls_config_*`):私钥与证书**任一为空**
-//!   即返回零配置形态(信任系统根、无客户端证书,同 Go 的零值
-//!   `tls.Config`);两者齐备时加载客户端证书,根信任取 CA(缺省
-//!   时同样回落系统根,同 Go 的 `RootCAs == nil`)。
+//!   即返回零配置形态(信任系统根、无客户端证书);两者齐备时
+//!   加载客户端证书,根信任取 CA(缺省时回落系统根)。
 //!
-//! 与 Go 版的差异:
+//! 行为要点:
 //!
-//! - 返回 rustls 配置对象而非 Go 的 `*tls.Config`;
-//! - `insecure_skip_verify` 参数保留但为空操作——Go 版把它设在
-//!   服务端配置上,而该字段只对客户端验证生效,本就无效果;
-//! - PEM 解析基于 `rustls-pemfile`(只认 `CERTIFICATE` 与私钥块,
-//!   与 Go `pem.Decode` + `x509.ParseCertificate` 的逐块循环等价)。
+//! - `insecure_skip_verify` 参数保留但为空操作——本库不提供
+//!   关闭证书校验的途径;
+//! - PEM 解析基于 `rustls-pemfile`,只认 `CERTIFICATE` 与私钥块,
+//!   逐块扫描。
 //!
 //! ````ignore
 //! let cfg = rust_utils::tls::load_server_tls_config_file(
@@ -31,8 +29,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 
-/// 从 PEM 文件路径创建服务端 TLS 配置(上游
-/// `LoadServerTlsConfigFile`)。`ca_file` 为空表示单向认证。
+/// 从 PEM 文件路径创建服务端 TLS 配置。`ca_file` 为空表示单向认证。
 pub fn load_server_tls_config_file(
     key_file: &str,
     cert_file: &str,
@@ -52,9 +49,7 @@ pub fn load_server_tls_config_file(
     )
 }
 
-/// 从 PEM 字节创建服务端 TLS 配置(上游 `LoadServerTlsConfigFile`
-/// 的 `LoadServerTlsConfigString` 形态)。`ca_pem` 为 `None` 表示
-/// 单向认证。
+/// 从 PEM 字节创建服务端 TLS 配置。`ca_pem` 为 `None` 表示单向认证。
 pub fn load_server_tls_config_pem(
     key_pem: &[u8],
     cert_pem: &[u8],
@@ -88,10 +83,8 @@ pub fn load_server_tls_config_pem(
     }
 }
 
-/// 从 PEM 文件路径创建客户端 TLS 配置(上游
-/// `LoadClientTlsConfigFile`)。私钥或证书任一为空时返回零配置
-/// 形态(同 Go:`keyFile == "" || certFile == ""` 即返回空
-/// `tls.Config`,`caFile` 被忽略)。
+/// 从 PEM 文件路径创建客户端 TLS 配置。私钥或证书任一为空时返回
+/// 零配置形态(信任系统根、无客户端证书,`ca_file` 被忽略)。
 pub fn load_client_tls_config_file(
     key_file: &str,
     cert_file: &str,
@@ -109,15 +102,14 @@ pub fn load_client_tls_config_file(
     )
 }
 
-/// 从 PEM 字节创建客户端 TLS 配置(上游 `LoadClientTlsConfigString`
-/// 形态)。私钥或证书任一为空时返回零配置形态。
+/// 从 PEM 字节创建客户端 TLS 配置。私钥或证书任一为空时返回零配置形态。
 pub fn load_client_tls_config_pem(
     key_pem: &[u8],
     cert_pem: &[u8],
     ca_pem: Option<&[u8]>,
 ) -> Result<ClientConfig, String> {
     if key_pem.is_empty() || cert_pem.is_empty() {
-        // 上游零配置:系统根、无客户端证书
+        // 零配置形态:系统根、无客户端证书
         let roots = system_roots()?;
         return Ok(ClientConfig::builder()
             .with_root_certificates(roots)
@@ -217,7 +209,7 @@ mod tests {
 
     #[test]
     fn server_one_way_from_files() {
-        // 上游:cert/key 必填、无 CA → 单向认证
+        // cert/key 必填、无 CA → 单向认证
         let cfg = load_server_tls_config_file(
             &fixture("test_server.key"),
             &fixture("test_server.cert"),
@@ -229,7 +221,7 @@ mod tests {
 
     #[test]
     fn server_mutual_from_pem_bytes() {
-        // 上游:提供 CA → RequireAndVerifyClientCert(双向)
+        // 提供 CA → RequireAndVerifyClientCert(双向)
         let key = fs::read(fixture("test_server.key")).unwrap();
         let cert = fs::read(fixture("test_server.cert")).unwrap();
         let ca = fs::read(fixture("test_ca.cert")).unwrap();
@@ -238,7 +230,7 @@ mod tests {
 
     #[test]
     fn server_missing_key_or_cert() {
-        // 上游:KeyPEMBlock 和 CertPEMBlock 必须同时存在
+        // KeyPEMBlock 和 CertPEMBlock 必须同时存在
         let err = load_server_tls_config_pem(&[], &[], None, false).unwrap_err();
         assert_eq!(
             err,
@@ -270,7 +262,7 @@ mod tests {
 
     #[test]
     fn client_with_ca_and_client_cert() {
-        // 上游:客户端证书 + CA 根(双向认证的客户端侧)
+        // 客户端证书 + CA 根(双向认证的客户端侧)
         let cfg = load_client_tls_config_file(
             &fixture("test_client.key"),
             &fixture("test_client.cert"),
@@ -281,7 +273,7 @@ mod tests {
 
     #[test]
     fn client_empty_key_or_cert_returns_zero_config() {
-        // 上游:key/cert 任一为空 → 零值配置(系统根,caFile 被忽略)
+        // key/cert 任一为空 → 零配置形态(系统根,caFile 被忽略)
         assert!(load_client_tls_config_file("", "", &fixture("test_ca.cert")).is_ok());
         let cfg = load_client_tls_config_pem(&[], &[], None);
         assert!(cfg.is_ok());

@@ -1,8 +1,7 @@
-//! URL slug 生成(移植自 go-utils/slug),feature `slug`。
+//! URL slug 生成,feature `slug`。
 //!
 //! 基于 `slug` crate:unicode 转写为 ASCII、小写化、非法字符替换为 `-`。
-//! Go 版的德语等语言特化入口未移植(`slug` crate 的转写规则已覆盖
-//! 常见西文)。
+//! 德语等语言特化的转写规则已由 `slug` crate 覆盖常见西文。
 //!
 //! ```
 //! use rust_utils::slug;
@@ -16,7 +15,7 @@ pub fn generate(input: &str) -> String {
     slug::slugify(input)
 }
 
-/// [`generate`] 的别名(Go 版 `GenerateEnglish`)。
+/// [`generate`] 的英文 slug 快捷别名。
 pub fn generate_english(input: &str) -> String {
     slug::slugify(input)
 }

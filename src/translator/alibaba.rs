@@ -1,18 +1,15 @@
-//! 阿里云机器翻译后端(对应 Go 版 `translator/alibaba`,feature
-//! `translator`)。
+//! 阿里云机器翻译后端,feature `translator`。
 //!
-//! 上游经官方 SDK(alimt + darabonba-openapi)调用
-//! `mt.<region>.aliyuncs.com` 的 RPC 接口;此处按该 SDK 的线上
-//! 形态逐式复刻:URL 查询串与表单体各自按键排序、经
-//! [`query_escape`](crate::translator) 编码(SDK 的
-//! `url.Values.Encode`);签名为排序编码串经三处历史替换
-//! (`+`→`%20`、`*`→`%2A`、`%7E`→`~`)后整串二次转义,前缀
-//! `POST&%2F&`,HMAC-SHA1(密钥尾接 `&`)的 base64。
-//!
-//! 与上游的差异:SDK 的重试/退避与内部错误对象未移植(单次
-//! 请求,错误以字符串代替;上游客户端无显式超时,此处同样保持
-//! 默认);`SignatureNonce` 见包级文档;`Timestamp` 为上游
-//! `GetTimestamp` 的 GMT ISO8601 形态。
+//! - 请求行为:POST 调用 `mt.<region>.aliyuncs.com` 的 RPC 接口,
+//!   签名随 URL 查询串提交,业务参数同时作为表单体发送;单次
+//!   请求,不自动重试,错误一律为字符串;客户端无显式超时。
+//! - 签名与编码:URL 查询串与表单体各自按键名排序、经
+//!   [`query_escape`](crate::translator) 编码;签名为排序编码串
+//!   经三处固定替换(`+`→`%20`、`*`→`%2A`、`%7E`→`~`)后整串
+//!   二次转义,前缀 `POST&%2F&`,HMAC-SHA1(密钥尾接 `&`)的
+//!   base64;`SignatureNonce` 取 UUID v4 的 32 位十六进制,
+//!   `Timestamp` 为 GMT ISO8601 形态。
+//! - 测试:签名金标为官方 SDK 自带测试向量。
 
 use crate::base64util;
 use crate::translator::{form_encode, query_escape};
@@ -24,8 +21,8 @@ use uuid::Uuid;
 
 type HmacSha1 = Hmac<Sha1>;
 
-/// 阿里云翻译器(上游 `alibaba.Translator`:区域默认
-/// `cn-hangzhou`,上游 `WithRegionID` 语义)。
+/// 阿里云翻译器(区域默认 `cn-hangzhou`,经 `with_region_id`
+/// 设置)。
 pub struct Translator {
     access_key_id: String,
     access_key_secret: String,
@@ -34,8 +31,7 @@ pub struct Translator {
 }
 
 impl Translator {
-    /// 创建(上游 `NewTranslator`:上游端点构造恒有区域,无错误
-    /// 路径,此处直接返回 `Self`)。
+    /// 创建(端点由区域构造,无错误路径)。
     pub fn new(access_key_id: &str, access_key_secret: &str) -> Self {
         Self {
             access_key_id: access_key_id.to_string(),
@@ -45,23 +41,22 @@ impl Translator {
         }
     }
 
-    /// 设置区域 ID(上游 `WithRegionID`)。
+    /// 设置区域 ID。
     pub fn with_region_id(mut self, region_id: &str) -> Self {
         self.region_id = region_id.to_string();
         self
     }
 
-    /// 端点(上游:`mt.<region>.aliyuncs.com`)。
+    /// 端点(`mt.<region>.aliyuncs.com`)。
     fn endpoint(&self) -> String {
         format!("mt.{}.aliyuncs.com", self.region_id)
     }
 
-    /// RPC 签名(上游 `buildRpcStringToSign` + `sign` 的逐式
-    /// 复刻,见模块文档)。
+    /// RPC 签名(按官方 API 的 RPC 签名算法,见模块文档)。
     fn sign_rpc(params: &[(&str, &str)], method: &str, secret: &str) -> String {
-        // 上游 getUrlFormedMap:url.Values.Encode() 的排序+转义
+        // 参数按键名排序并经转义
         let formed = form_encode(params);
-        // 上游的三处历史替换(对 Encode 的输出仅 "+" 分支有效)
+        // 三处固定替换(经 query_escape 的输出仅 "+" 分支有效)
         let replaced = formed
             .replace('+', "%20")
             .replace('*', "%2A")
@@ -74,8 +69,8 @@ impl Translator {
         base64util::encode(&mac.finalize().into_bytes())
     }
 
-    /// 构造请求(上游 `DoRPCRequest` 的参数组装与签名;时间戳与
-    /// nonce 由上游取当下时间与随机杂凑,此处注入以便测试)。
+    /// 构造请求(参数组装与签名;时间戳与 nonce 由调用方注入
+    /// 以便测试)。
     fn build_request(
         &self,
         source: &str,
@@ -91,7 +86,7 @@ impl Translator {
             ("SourceText", source),
             ("TargetLanguage", target_lang),
         ];
-        // 上游 Query 初始集与鉴权参数(body 参数经 Merge 并入)
+        // 鉴权与固定参数(业务参数并入其中共同参与签名)
         let mut signed_params = [
             ("AccessKeyId", self.access_key_id.as_str()),
             ("Action", "TranslateGeneral"),
@@ -112,7 +107,7 @@ impl Translator {
         (url, body)
     }
 
-    /// 响应解析(上游 `TranslateGeneral` 的响应处理)。
+    /// 响应解析。
     fn parse_response(body: &str) -> Result<String, String> {
         let resp: AliResponse =
             serde_json::from_str(body).map_err(|e| format!("alibaba translate error: {e}"))?;
@@ -135,14 +130,14 @@ impl Translator {
 }
 
 impl crate::translator::Translator for Translator {
-    /// 翻译(上游 `Translate` 的完整调用链)。
+    /// 翻译。
     fn translate(
         &self,
         source: &str,
         source_lang: &str,
         target_lang: &str,
     ) -> Result<String, String> {
-        // 上游 GetTimestamp/GetNonce
+        // 时间戳(GMT ISO8601)与 nonce(UUID v4)
         let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
         let nonce = Uuid::new_v4().simple().to_string();
         let (url, body) = self.build_request(source, source_lang, target_lang, &timestamp, &nonce);
@@ -167,7 +162,7 @@ impl crate::translator::Translator for Translator {
     }
 }
 
-/// 上游 `TranslateGeneralResponseBody` 的 JSON 形态。
+/// 响应体的 JSON 形态。
 #[derive(Deserialize)]
 struct AliResponse {
     #[serde(default, rename = "Code")]
@@ -178,7 +173,7 @@ struct AliResponse {
     data: Option<AliData>,
 }
 
-/// 上游 `TranslateGeneralResponseBodyData` 的 JSON 形态。
+/// 响应体 `Data` 内层的 JSON 形态。
 #[derive(Deserialize)]
 struct AliData {
     #[serde(default, rename = "Translated")]
@@ -192,7 +187,7 @@ mod tests {
     #[test]
     fn alibaba_constructor_and_region() {
         let t = Translator::new("test_access_key_id", "test_access_key_secret");
-        assert_eq!(t.region_id, "cn-hangzhou"); // 上游默认区域
+        assert_eq!(t.region_id, "cn-hangzhou"); // 默认区域
         assert_eq!(t.endpoint(), "mt.cn-hangzhou.aliyuncs.com");
         let t = t.with_region_id("cn-shanghai");
         assert_eq!(t.region_id, "cn-shanghai");
@@ -201,9 +196,8 @@ mod tests {
 
     #[test]
     fn alibaba_rpc_signature_golden() {
-        // 上游 SDK 自带测试向量:
+        // 官方 SDK 自带测试向量:
         // GetRPCSignature({"test":"ok"}, method="", secret="accessKeySecret")
-        // (与独立实现的预计算一致)
         assert_eq!(
             Translator::sign_rpc(&[("test", "ok")], "", "accessKeySecret"),
             "jHx/oHoHNrbVfhncHEvPdHXZwHU="
