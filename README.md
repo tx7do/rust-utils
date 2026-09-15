@@ -1,4 +1,12 @@
+<div align="center">
+
 # rust-utils
+
+[English](./README_en.md) | **中文** | [日本語](./README_ja.md)
+
+</div>
+
+---
 
 Rust 工具箱:命名风格转换、切片/映射辅助、雪花 ID、订单号、查询条件解析、MySQL DDL 解析、优先级事件循环、数据回填、密码哈希、AES/HMAC、JWT、随机昵称生成、银行卡 BIN 查询、图形验证码、IP 归属地、机器翻译、分布式锁、国密等。
 
