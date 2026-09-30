@@ -154,3 +154,70 @@ pub mod timeutil;
 pub mod tls;
 #[cfg(feature = "translator")]
 pub mod translator;
+
+#[cfg(all(
+    test,
+    any(
+        feature = "captcha",
+        feature = "crypto",
+        feature = "sm",
+        feature = "translator"
+    )
+))]
+mod tests {
+    use super::base64util;
+
+    #[test]
+    fn test_base64_rfc4648_vectors() {
+        // RFC 4648 第 10 节测试向量
+        let cases = [
+            (&b""[..], ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(base64util::encode(input), want, "input: {input:?}");
+            assert_eq!(
+                base64util::decode(want).unwrap(),
+                input.to_vec(),
+                "encoded: {want}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_base64_decode_lenient_and_invalid() {
+        // 解码容忍填充与换行(不容忍空格)
+        assert_eq!(base64util::decode("Zm9vYg==\n").unwrap(), b"foob".to_vec());
+        assert_eq!(
+            base64util::decode("Zm9v\r\nYg==").unwrap(),
+            b"foob".to_vec()
+        );
+        // 非法字符报错
+        assert!(base64util::decode("Zm9v*").is_err());
+        assert!(base64util::decode("Zm 9vYg==").is_err());
+        assert!(base64util::decode("中文").is_err());
+    }
+
+    #[test]
+    fn test_base64_roundtrip_various_lengths() {
+        // 0..=10 字节全长度编解码回环
+        for len in 0..=10 {
+            let data: Vec<u8> = (0..len as u8)
+                .map(|i| i.wrapping_mul(37).wrapping_add(11))
+                .collect();
+            let enc = base64util::encode(&data);
+            assert_eq!(base64util::decode(&enc).unwrap(), data, "len: {len}");
+            // 带填充时长度恒为 4 的倍数
+            assert_eq!(enc.len() % 4, 0);
+        }
+        // 全字节域采样回环
+        let all: Vec<u8> = (0..=255u8).collect();
+        let enc = base64util::encode(&all);
+        assert_eq!(base64util::decode(&enc).unwrap(), all);
+    }
+}

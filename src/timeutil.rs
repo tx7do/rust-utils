@@ -502,4 +502,43 @@ mod tests {
         );
         assert!(from_to("bad", DATE_LAYOUT, "%Y").is_err());
     }
+
+    #[test]
+    fn test_get_today_and_yesterday_range_time() {
+        // 无参版本以当前时间为基准;距本地午夜不足 5s 时跳过等值
+        // 断言,避免跨天瞬间的竞态
+        let now = Local::now();
+        let (_, tonight_end) = get_today_range_at(now);
+        let near_midnight = (tonight_end - now).num_seconds() < 5;
+
+        let (t0, t1) = get_today_range_time();
+        let (y0, y1) = get_yesterday_range_time();
+        let (e0, e1) = get_today_range_at(now);
+        let (ye0, ye1) = get_yesterday_range_at(now);
+        if !near_midnight {
+            assert_eq!(t0, e0);
+            assert_eq!(t1, e1);
+            assert_eq!(y0, ye0);
+            assert_eq!(y1, ye1);
+            assert_eq!(y1, t1 - Duration::days(1));
+            assert_eq!(y0, t0 - Duration::days(1));
+        }
+        // 区间两端固定为 00:00:00 / 23:59:59,且同一天
+        assert_eq!(
+            t0.format(DATETIME_LAYOUT).to_string(),
+            format!("{} 00:00:00", t0.format(DATE_LAYOUT))
+        );
+        assert_eq!(
+            t1.format(DATETIME_LAYOUT).to_string(),
+            format!("{} 23:59:59", t0.format(DATE_LAYOUT))
+        );
+        assert_eq!(
+            y0.format(DATETIME_LAYOUT).to_string(),
+            format!("{} 00:00:00", y0.format(DATE_LAYOUT))
+        );
+        assert_eq!(
+            y1.format(DATETIME_LAYOUT).to_string(),
+            format!("{} 23:59:59", y0.format(DATE_LAYOUT))
+        );
+    }
 }

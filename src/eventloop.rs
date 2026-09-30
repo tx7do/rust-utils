@@ -1300,4 +1300,123 @@ mod tests {
             "logger should have received warnings"
         );
     }
+
+    #[test]
+    fn test_is_running_lifecycle() {
+        let loop_ = EventLoop::new(16, Collector(Arc::new(Mutex::new(Vec::new()))), false);
+        assert!(!loop_.is_running());
+        loop_.start();
+        assert!(loop_.is_running());
+        loop_.stop();
+        assert!(!loop_.is_running());
+    }
+
+    #[test]
+    fn test_set_logger_runtime_injection() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Counter(Arc<AtomicUsize>);
+        impl EventLogger for Counter {
+            fn warn(&self, _msg: &str) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        // 构造时用默认 NoopLogger,运行中再注入计数 logger
+        let counter = Arc::new(AtomicUsize::new(0));
+        let loop_ = EventLoop::new(16, Collector(Arc::new(Mutex::new(Vec::new()))), true);
+        loop_.set_frame_parameters(
+            Some(Duration::from_millis(10)),
+            Some(Duration::from_nanos(1)),
+            Some(Duration::ZERO),
+        );
+        loop_.set_logger(Arc::new(Counter(counter.clone())));
+        loop_.start();
+        loop_
+            .submit(Event::new("budget", None).with_priority(Priority::High))
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while counter.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        loop_.stop();
+        assert!(
+            counter.load(Ordering::Relaxed) >= 1,
+            "runtime-injected logger should receive warnings"
+        );
+    }
+
+    #[test]
+    fn test_callback_channel_send_recv() {
+        let (tx, rx) = callback_channel(2);
+        // 容量内投递成功,先进先出
+        assert!(tx.send(1).is_ok());
+        assert!(tx.send(2).is_ok());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), 1);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), 2);
+        // 克隆发送端共享容量
+        let tx2 = tx.clone();
+        assert!(tx.send(3).is_ok());
+        assert!(tx2.send(4).is_ok());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), 3);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), 4);
+        // 空通道超时
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(20)),
+            Err(CbRecvTimeoutError::Timeout)
+        );
+    }
+
+    #[test]
+    fn test_callback_channel_full_and_close() {
+        let (tx, rx) = callback_channel::<u32>(1);
+        assert!(tx.send(10).is_ok());
+        // 容量满:阻塞 send_timeout 超时后值原样带回
+        match tx.send_timeout(20, Duration::from_millis(50)) {
+            Err(CbSendTimeoutError::Timeout(v)) => assert_eq!(v, 20),
+            Err(CbSendTimeoutError::Disconnected(_)) => {
+                panic!("expected timeout, got disconnected")
+            }
+            Ok(()) => panic!("expected timeout, send succeeded"),
+        }
+        // 取空后可继续投递
+        assert_eq!(rx.recv().unwrap(), 10);
+        assert!(tx.send(21).is_ok());
+        assert_eq!(rx.recv().unwrap(), 21);
+
+        // 接收端丢弃后:send 与 send_timeout 均报 Disconnected,值原样带回
+        drop(rx);
+        match tx.send(30) {
+            Err(CbSendError(v)) => assert_eq!(v, 30),
+            Ok(()) => panic!("expected send error, send succeeded"),
+        }
+        match tx.send_timeout(31, Duration::from_millis(50)) {
+            Err(CbSendTimeoutError::Disconnected(v)) => assert_eq!(v, 31),
+            Err(CbSendTimeoutError::Timeout(_)) => panic!("expected disconnected, got timeout"),
+            Ok(()) => panic!("expected disconnected, send succeeded"),
+        }
+    }
+
+    #[test]
+    fn test_new_request_event_wires_callback() {
+        // new_request_event 即 Event::with_callback 的封装:事件携带回调,
+        // 处理结果经回调通道送回
+        struct Echo;
+        impl EventProcessor<String> for Echo {
+            fn process(&mut self, event: Event<String>) -> EventResult<String> {
+                EventResult::ok(event.data.map(|d| format!("echo: {d}")))
+            }
+        }
+        let loop_ = EventLoop::new(16, Echo, false);
+        loop_.start();
+
+        let (ev, rx) = new_request_event("req", Some("ping".to_string()));
+        // 事件上确实挂了回调
+        assert!(ev.callback.is_some());
+        loop_.submit(ev).unwrap();
+        let result = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        loop_.stop();
+        assert_eq!(result.data.as_deref(), Some("echo: ping"));
+    }
 }

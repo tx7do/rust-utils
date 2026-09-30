@@ -399,4 +399,49 @@ mod tests {
         assert!(!cn.is_empty());
         assert!(g.exist_dict(DICTIONARY_TYPE_JAPANESE_SURNAMES));
     }
+
+    #[test]
+    fn test_generate_parts() {
+        let g = Generator::new();
+        // 已加载的字典逐个出词,缺失的字典被跳过
+        let parts = g.generate_parts(&[
+            DICTIONARY_TYPE_ADJECTIVE,
+            "no-such-dict",
+            DICTIONARY_TYPE_VERB,
+        ]);
+        assert_eq!(parts.len(), 2);
+        assert!(!parts[0].is_empty());
+        assert!(!parts[1].is_empty());
+        // 全部缺失 → 空
+        assert!(g.generate_parts(&["a", "b"]).is_empty());
+        // 空方案 → 空
+        assert!(g.generate_parts(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_load_dict_from_file() {
+        // 写临时词库文件后加载
+        let path = std::env::temp_dir().join(format!("rust-utils-dict-{}.txt", std::process::id()));
+        std::fs::write(&path, "甲\n乙\n丙\n").unwrap();
+
+        let mut g = Generator::empty();
+        g.load_dict_from_file(DICTIONARY_TYPE_ADJECTIVE, &path)
+            .unwrap();
+        assert!(g.exist_dict(DICTIONARY_TYPE_ADJECTIVE));
+        assert_eq!(g.dict_item_count(DICTIONARY_TYPE_ADJECTIVE), 3);
+        // 生成的词来自文件词库
+        let part = g.generate_parts(&[DICTIONARY_TYPE_ADJECTIVE]);
+        assert_eq!(part.len(), 1);
+        assert!(["甲", "乙", "丙"].contains(&part[0].as_str()));
+
+        // 同名词库重复加载报错;不存在的文件报错
+        assert!(g
+            .load_dict_from_file(DICTIONARY_TYPE_ADJECTIVE, &path)
+            .is_err());
+        assert!(g
+            .load_dict_from_file(DICTIONARY_TYPE_VERB, std::path::Path::new("/no/such/file"))
+            .is_err());
+
+        std::fs::remove_file(&path).ok();
+    }
 }

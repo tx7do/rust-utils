@@ -309,4 +309,17 @@ mod tests {
         assert!(!match_path("*.txt", "main.rs"));
         assert!(match_path("src/**/*.rs", "src/a/b.rs"));
     }
+
+    #[test]
+    fn test_exe_path_and_working_dir() {
+        // 工作目录与 std::env::current_dir 一致
+        assert_eq!(working_dir(), std::env::current_dir().unwrap());
+        // 可执行程序路径非空,且其父目录存在
+        let exe = exe_path();
+        assert!(!exe.as_os_str().is_empty());
+        assert!(exe
+            .parent()
+            .map(|p| !p.as_os_str().is_empty())
+            .unwrap_or(false));
+    }
 }

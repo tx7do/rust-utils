@@ -131,6 +131,23 @@ ureq = { version = "2", optional = true }
 md-5 = { version = "0.11", optional = true }
 sha1 = { version = "0.10", optional = true }
 
+# 基准测试(仅 `cargo bench` 时编译);关闭默认特性以精简依赖,
+# 只保留 cargo bench 所需的 cargo_bench_support。
+[dev-dependencies]
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "stringcase"
+harness = false
+
+[[bench]]
+name = "collections"
+harness = false
+
+[[bench]]
+name = "parsers"
+harness = false
+
 # Crate-wide lint policy: no unsafe code, period.
 [lints.rust]
 unsafe_code = "forbid"

@@ -85,3 +85,71 @@ pub(crate) fn net_matches_prefix(ip: IpAddr, net: IpAddr, bits: u8) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn test_parse_ip_bytes() {
+        // IPv4 → 4 字节网络序
+        assert_eq!(
+            parse_ip_bytes("1.2.3.4").as_deref(),
+            Some(&[1, 2, 3, 4][..])
+        );
+        // IPv4 映射形态的 IPv6 折叠为 4 字节
+        assert_eq!(
+            parse_ip_bytes("::ffff:1.2.3.4").as_deref(),
+            Some(&[1, 2, 3, 4][..])
+        );
+        // 普通 IPv6 → 16 字节
+        let mut loopback = vec![0u8; 15];
+        loopback.push(1);
+        assert_eq!(parse_ip_bytes("::1"), Some(loopback));
+        assert_eq!(parse_ip_bytes("::").as_deref(), Some(&[0u8; 16][..]));
+        // 不可解析
+        assert_eq!(parse_ip_bytes("abc"), None);
+        assert_eq!(parse_ip_bytes("1.2.3"), None);
+        assert_eq!(parse_ip_bytes(""), None);
+    }
+
+    #[test]
+    fn test_net_matches_prefix_v4() {
+        let net = IpAddr::from(Ipv4Addr::new(192, 168, 0, 0));
+        let ip_in = IpAddr::from(Ipv4Addr::new(192, 168, 10, 20));
+        let ip_out = IpAddr::from(Ipv4Addr::new(192, 169, 0, 1));
+        assert!(net_matches_prefix(ip_in, net, 16));
+        assert!(!net_matches_prefix(ip_out, net, 16));
+        // /32 精确匹配
+        assert!(net_matches_prefix(
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
+            32
+        ));
+        assert!(!net_matches_prefix(
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 2)),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
+            32
+        ));
+        // /0 匹配一切,/33 与 /255 越界不匹配
+        assert!(net_matches_prefix(ip_out, net, 0));
+        assert!(!net_matches_prefix(ip_in, net, 33));
+        assert!(!net_matches_prefix(ip_in, net, 255));
+    }
+
+    #[test]
+    fn test_net_matches_prefix_v6_and_mixed() {
+        let net: IpAddr = "2001:db8::".parse().unwrap();
+        let ip_in: IpAddr = "2001:db8::dead:beef".parse().unwrap();
+        let ip_out: IpAddr = "2001:db9::1".parse().unwrap();
+        assert!(net_matches_prefix(ip_in, net, 32));
+        assert!(!net_matches_prefix(ip_out, net, 32));
+        assert!(net_matches_prefix(ip_out, net, 0));
+        assert!(!net_matches_prefix(ip_in, net, 129));
+        // v4 与 v6 混用恒不匹配
+        let v4: IpAddr = "192.168.1.1".parse().unwrap();
+        assert!(!net_matches_prefix(v4, net, 0));
+        assert!(!net_matches_prefix(ip_in, v4, 0));
+    }
+}

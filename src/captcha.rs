@@ -2519,4 +2519,30 @@ mod tests {
         store.delete("rk1").unwrap();
         assert!(!store.exists("rk1").unwrap());
     }
+
+    #[test]
+    fn with_store_custom_config() {
+        // 自定义存储 + 自定义键前缀:生成后答案落在自定义前缀键下,可校验
+        let config = Config {
+            key_prefix: "custom-prefix".to_string(),
+            ..Config::default()
+        };
+        let svc = Captcha::with_store(MemoryStore::new(), config);
+        let (id, image, answer) = svc.generate().unwrap();
+        assert!(!id.is_empty());
+        assert!(!image.is_empty());
+        assert!(!answer.is_empty());
+        // 正确答案通过校验;错误答案不通过
+        assert!(svc.verify(&id, &answer).unwrap());
+        let (id2, _, _) = svc.generate().unwrap();
+        assert!(!svc.verify(&id2, "wrong-answer").unwrap());
+    }
+
+    #[test]
+    fn with_store_default_trait() {
+        // Default trait 同样经由 with_store 构造
+        let svc = Captcha::<MemoryStore>::default();
+        let (id, _, answer) = svc.generate().unwrap();
+        assert!(svc.verify_keep(&id, &answer).unwrap());
+    }
 }

@@ -923,4 +923,29 @@ mod tests {
             "5d5d139563c95b5967b9bd9a8c9b233a9dedb45072794cd232dc1b74832607d0"
         );
     }
+
+    #[test]
+    fn test_new_snowflake_node_shared() {
+        // 同一 worker_id 返回共享节点;生成的 ID 单调不减且互不相同
+        let a = new_snowflake_node(123).unwrap();
+        let b = new_snowflake_node(123).unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+
+        let first = new_snowflake_id(123).unwrap();
+        let second = new_snowflake_id(123).unwrap();
+        assert!(second > first);
+        // 非法 worker_id 报错(负数与超上限)
+        assert!(new_snowflake_node(-1).is_err());
+        assert!(new_snowflake_node(1024).is_err());
+    }
+
+    #[test]
+    fn test_new_sonyflake_id() {
+        // 全局 Sonyflake 生成的 ID 非零且互不相同
+        let a = new_sonyflake_id();
+        let b = new_sonyflake_id();
+        assert!(a > 0);
+        assert!(b > 0);
+        assert_ne!(a, b);
+    }
 }

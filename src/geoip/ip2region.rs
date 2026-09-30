@@ -1032,4 +1032,21 @@ mod tests {
         assert_eq!(rb.unwrap(), "B1|B2|B3|B4");
         assert_eq!(pool.loan_count(), 0);
     }
+
+    #[test]
+    fn ip2region_new_with_buffer_direct() {
+        // 整文件驻留构造:直接持有 xdb 字节即可查询,io_count 恒为 0
+        let searcher = Searcher::new_with_buffer(IpVersion::IPv4, build_v4_fixture()).unwrap();
+        assert_eq!(searcher.search_by_str("1.2.0.5").unwrap(), "A1|A2|A3|A4");
+        assert_eq!(searcher.search_by_str("1.3.0.0").unwrap(), "B1|B2|B3|B4");
+        assert_eq!(searcher.search_by_str("9.9.9.9").unwrap(), "");
+        // 字节数组入口
+        assert_eq!(searcher.search(&[1, 2, 0, 5]).unwrap(), "A1|A2|A3|A4");
+        // IPv6 构造
+        let v6 = Searcher::new_with_buffer(IpVersion::IPv6, build_v6_fixture()).unwrap();
+        assert_eq!(v6.search_by_str("2001:db8::1").unwrap(), "C1|C2|C3|C4");
+        // 空缓冲不 panic,查询返回错误
+        let empty = Searcher::new_with_buffer(IpVersion::IPv4, Vec::new()).unwrap();
+        assert!(empty.search_by_str("1.2.0.5").is_err());
+    }
 }

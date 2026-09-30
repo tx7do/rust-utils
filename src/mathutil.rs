@@ -265,4 +265,22 @@ mod tests {
     fn test_gaussian_zero_variance_panics() {
         Gaussian::new(0.0, 0.0);
     }
+
+    #[test]
+    fn test_ierfc() {
+        // 与标准值对照:ierfc(0.5)≈0.4769,ierfc(1)≈0,ierfc(0.9)≈0.0889
+        assert!((ierfc(0.5) - 0.476936).abs() < 1e-4);
+        assert!(ierfc(1.0).abs() < 1e-6);
+        assert!((ierfc(0.9) - 0.088856).abs() < 1e-4);
+        // 饱和分支
+        assert_eq!(ierfc(0.0), 100.0);
+        assert_eq!(ierfc(-1.0), 100.0);
+        assert_eq!(ierfc(2.0), -100.0);
+        assert_eq!(ierfc(3.0), -100.0);
+        // 与 erfc 互逆:erfc(ierfc(x)) ≈ x
+        for x in [0.05, 0.2, 0.5, 0.8, 0.95, 1.0, 1.2, 1.6, 1.95] {
+            let back = erfc(ierfc(x));
+            assert!((back - x).abs() < 1e-6, "erfc(ierfc({x})) = {back}");
+        }
+    }
 }

@@ -590,4 +590,24 @@ mod tests {
         assert!(random_ipv4().contains('.'));
         assert_eq!(color_hex().len(), 7);
     }
+
+    #[test]
+    fn test_string_with_charset() {
+        let charset = b"AB";
+        // 自由函数与方法的输出只含字符集内的字符
+        for _ in 0..20 {
+            let s = string_with_charset(16, charset);
+            assert_eq!(s.len(), 16);
+            assert!(s.chars().all(|c| c == 'A' || c == 'B'));
+        }
+        let mut r = Randomizer::new();
+        for _ in 0..20 {
+            let s = r.string_with_charset(8, b"xyz0");
+            assert_eq!(s.len(), 8);
+            assert!(s.chars().all(|c| "xyz0".contains(c)));
+        }
+        // 单字符字符集与零长度
+        assert_eq!(string_with_charset(5, b"Q"), "QQQQQ");
+        assert_eq!(string_with_charset(0, charset), "");
+    }
 }

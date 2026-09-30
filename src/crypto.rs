@@ -586,4 +586,32 @@ mod tests {
         assert_eq!(secret_a.len(), 32);
         assert!(a.derive_shared_secret(&[0u8; 10]).is_err());
     }
+
+    #[test]
+    fn test_aes_gcm_with_nonce() {
+        // 指定 nonce:同一密钥 + nonce 加密结果是确定性的
+        let nonce = [7u8; 12];
+        let plain = b"deterministic payload";
+        for key_len in [16, 32] {
+            let key = vec![0x42u8; key_len];
+            let cipher = AesGcmCipher::new(key).unwrap();
+            let c1 = cipher.encrypt_with_nonce(plain, nonce).unwrap();
+            let c2 = cipher.encrypt_with_nonce(plain, nonce).unwrap();
+            assert_eq!(c1, c2, "key_len: {key_len}");
+            assert_eq!(
+                cipher.decrypt_with_nonce(&c1, nonce).unwrap(),
+                plain.to_vec()
+            );
+            // 密文长度 = 明文 + 16 字节 GCM tag
+            assert_eq!(c1.len(), plain.len() + 16);
+            // 换 nonce 解密失败(认证校验不过)
+            assert!(cipher.decrypt_with_nonce(&c1, [8u8; 12]).is_err());
+        }
+        // 不同 nonce 产生不同密文
+        let cipher = AesGcmCipher::new(vec![1u8; 32]).unwrap();
+        assert_ne!(
+            cipher.encrypt_with_nonce(plain, [1u8; 12]).unwrap(),
+            cipher.encrypt_with_nonce(plain, [2u8; 12]).unwrap()
+        );
+    }
 }

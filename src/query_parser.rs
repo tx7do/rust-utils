@@ -484,4 +484,26 @@ mod tests {
         assert!(decode_special_characters("bad%zz").is_err());
         assert!(decode_special_characters("bad%2").is_err());
     }
+
+    #[test]
+    fn test_parse_order_by_field() {
+        let collect = |input: &str| {
+            let mut out = Vec::new();
+            parse_order_by_field(input, |field, desc| out.push((field.to_string(), desc)));
+            out
+        };
+        // `-` 前缀降序,`+` 前缀与裸字段升序,空白被裁剪
+        assert_eq!(
+            collect("-created_at"),
+            vec![("created_at".to_string(), true)]
+        );
+        assert_eq!(
+            collect("+created_at"),
+            vec![("created_at".to_string(), false)]
+        );
+        assert_eq!(collect(" name "), vec![("name".to_string(), false)]);
+        // 空串与纯空白不触发 handler
+        assert_eq!(collect(""), Vec::<(String, bool)>::new());
+        assert_eq!(collect("   "), Vec::<(String, bool)>::new());
+    }
 }

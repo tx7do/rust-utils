@@ -714,4 +714,37 @@ mod tests {
         let result2 = split_with("HTTPStatusCode", &["Status"]);
         assert_eq!(result2, vec!["HTTP", "Status", "Code"]);
     }
+
+    #[test]
+    fn test_pascal_case_alias() {
+        // pascal_case 是 upper_camel_case 的别名,camel_case 是 lower_camel_case 的别名
+        for input in ["hello world", "user_id", "HTTPServer", "foo-bar-baz"] {
+            assert_eq!(
+                pascal_case(input),
+                upper_camel_case(input),
+                "input: {input}"
+            );
+            assert_eq!(camel_case(input), lower_camel_case(input), "input: {input}");
+        }
+        assert_eq!(pascal_case("hello world"), "HelloWorld");
+        assert_eq!(camel_case("hello world"), "helloWorld");
+    }
+
+    #[test]
+    fn test_replace_non_alphanumeric() {
+        // 自定义替换符
+        assert_eq!(replace_non_alphanumeric("a-b_c d", "-"), "a-b-c-d");
+        // 连续非字母数字只替换一次
+        assert_eq!(replace_non_alphanumeric("a--b", "-"), "a-b");
+        assert_eq!(replace_non_alphanumeric("a  b", "_"), "a_b");
+        // 空替换符退化为 `_`
+        assert_eq!(replace_non_alphanumeric("a.b", ""), "a_b");
+        // 全字母数字与全符号
+        assert_eq!(replace_non_alphanumeric("abc123", "-"), "abc123");
+        assert_eq!(replace_non_alphanumeric("!!!", "-"), "-");
+        // 首尾符号
+        assert_eq!(replace_non_alphanumeric("-a-", "+"), "+a+");
+        // 空串
+        assert_eq!(replace_non_alphanumeric("", "-"), "");
+    }
 }

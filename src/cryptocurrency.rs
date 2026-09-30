@@ -232,4 +232,73 @@ mod tests {
         assert_eq!(determine_wallet_type("Tshort"), Err("无效的TRC地址"));
         assert_eq!(determine_wallet_type("short"), Err("无效的OMINI地址"));
     }
+
+    #[test]
+    fn test_is_valid_btc_address() {
+        // 三种前缀均合法
+        assert!(is_valid_btc_address("1CFNjwLjZdSKB8nZopxhLaR8vvqaQKD3Bi"));
+        assert!(is_valid_btc_address("3J98t1RHT73CNmQwertyyWrnqRhWNLy"));
+        assert!(is_valid_btc_address(
+            "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+        ));
+        // 前缀错误
+        assert!(!is_valid_btc_address("2CFNjwLjZdSKB8nZopxhLaR8vvqaQKD3Bi"));
+        assert!(!is_valid_btc_address(
+            "bc2qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+        ));
+        // 主体含易混淆字符 I / O
+        assert!(!is_valid_btc_address("1I FNjwLjZdSKB8nZopxhLaR8vvqaQKD3B"));
+        // 长度边界:24 位(不含前缀)过短,25 / 39 合法,40 过长
+        let body25 = "1".to_string() + &"a".repeat(25);
+        let body24 = "1".to_string() + &"a".repeat(24);
+        let body39 = "3".to_string() + &"a".repeat(39);
+        let body40 = "3".to_string() + &"a".repeat(40);
+        assert!(is_valid_btc_address(&body25));
+        assert!(is_valid_btc_address(&body39));
+        assert!(!is_valid_btc_address(&body24));
+        assert!(!is_valid_btc_address(&body40));
+    }
+
+    #[test]
+    fn test_is_valid_eth_address() {
+        assert!(is_valid_eth_address(
+            "0x15cc4bf4fe84fea178d2b10f89f1a6c914dfc8c2"
+        ));
+        // 大写十六进制同样合法
+        assert!(is_valid_eth_address(
+            "0x15CC4BF4FE84FEA178D2B10F89F1A6C914DFC8C2"
+        ));
+        // 长度 39 / 41
+        assert!(!is_valid_eth_address(
+            "0x15cc4bf4fe84fea178d2b10f89f1a6c914dfc8c"
+        ));
+        assert!(!is_valid_eth_address(
+            "0x15cc4bf4fe84fea178d2b10f89f1a6c914dfc8c22"
+        ));
+        // 非字母数字字符(ETH 校验口径为字母数字,非纯十六进制)
+        assert!(!is_valid_eth_address(
+            "0x!Zcc4bf4fe84fea178d2b10f89f1a6c914dfc8c2"
+        ));
+        // 缺前缀
+        assert!(!is_valid_eth_address(
+            "15cc4bf4fe84fea178d2b10f89f1a6c914dfc8c2"
+        ));
+    }
+
+    #[test]
+    fn test_is_valid_tron_address() {
+        assert!(is_valid_tron_address("TC74QG8tbtixG5Raa4fEifywgjrFs45fNz"));
+        assert!(is_valid_tron_address("TFUD8x3iAZ9dF7NDCGBtSjznemEomE5rP9"));
+        // 主体含数字 0
+        assert!(!is_valid_tron_address(
+            "TC74QG8tbtix0G5Raa4fEifywgjrFs45fNz"
+        ));
+        // 长度 33 / 35
+        assert!(!is_valid_tron_address("TC74QG8tbtixG5Raa4fEifywgjrFs45fN"));
+        assert!(!is_valid_tron_address(
+            "TC74QG8tbtixG5Raa4fEifywgjrFs45fNzzz"
+        ));
+        // 小写 t 前缀不合法
+        assert!(!is_valid_tron_address("tc74QG8tbtixG5Raa4fEifywgjrFs45fNz"));
+    }
 }

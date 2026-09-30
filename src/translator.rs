@@ -79,3 +79,39 @@ pub(crate) fn form_encode(pairs: &[(&str, &str)]) -> String {
 pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_query_escape() {
+        // ASCII 字母数字与 -_.~ 直通
+        assert_eq!(query_escape("abcXYZ019-_.~"), "abcXYZ019-_.~");
+        // 空格作 +
+        assert_eq!(query_escape("a b"), "a+b");
+        // 其余按 %XX 大写十六进制
+        assert_eq!(query_escape("a&b=c"), "a%26b%3Dc");
+        // 中文按 UTF-8 字节逐个转义:张 = E5 BC A0
+        assert_eq!(query_escape("张"), "%E5%BC%A0");
+        assert_eq!(query_escape(""), "");
+    }
+
+    #[test]
+    fn test_form_encode() {
+        // 按键名排序,键值均转义
+        assert_eq!(form_encode(&[("b", "2"), ("a", "1")]), "a=1&b=2");
+        assert_eq!(form_encode(&[("q", "hello world")]), "q=hello+world");
+        assert_eq!(form_encode(&[("sign", "a+b/c")]), "sign=a%2Bb%2Fc");
+        assert_eq!(form_encode(&[]), "");
+        // 同名键按值排序,顺序稳定
+        assert_eq!(form_encode(&[("k", "2"), ("k", "1")]), "k=1&k=2");
+    }
+
+    #[test]
+    fn test_hex_encode() {
+        assert_eq!(hex_encode(&[0x00, 0x0f, 0xff]), "000fff");
+        assert_eq!(hex_encode(b"ABC"), "414243");
+        assert_eq!(hex_encode(&[]), "");
+    }
+}

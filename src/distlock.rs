@@ -141,4 +141,35 @@ mod tests {
         assert!(!cfg.block_wait);
         assert_eq!(cfg.retry_delay, Duration::from_millis(250));
     }
+
+    #[test]
+    fn stop_handle_stops_thread_and_is_idempotent() {
+        // 直接构造句柄:线程等到停止信号后退出
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let thread = std::thread::spawn(move || {
+            let _ = rx.recv();
+        });
+        let mut handle = StopHandle {
+            sender: Some(tx),
+            thread: Some(thread),
+        };
+        // 重复 stop 幂等:第一次等待线程退出,第二次直接返回
+        handle.stop();
+        handle.stop();
+        assert!(handle.sender.is_none());
+        assert!(handle.thread.is_none());
+    }
+
+    #[test]
+    fn stop_handle_with_finished_thread() {
+        // 线程自行结束、发送端已失效时 stop 仍安全
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        drop(rx);
+        let thread = std::thread::spawn(|| {});
+        let mut handle = StopHandle {
+            sender: Some(tx),
+            thread: Some(thread),
+        };
+        handle.stop();
+    }
 }
