@@ -13,14 +13,19 @@
 //! | [`stringcase`] | 默认 | 驼峰/蛇形/烤肉串转换,识别缩写词与数字段 |
 //! | [`stringutil`] | 默认 | 宽松数值/布尔解析、JSON 字段值重写 |
 //! | [`sliceutil`] | 默认 | 查找族、交集/差集/并集、去重、分块 |
+//! | [`sqlutil`] | 默认 | PostgreSQL 词法级 SQL 脱敏(MaskSQL)与表提取(ExtractTables) |
 //! | [`maputil`] | 默认 | keys/values/merge/drop/filter |
 //! | [`mathutil`] | 默认 | 统计量、手写正态分布(Gaussian)、Erfc/Ierfc |
+//! | [`netutil`] | 默认 | SSRF 防护(URL 校验 + 黑名单网段 + DNS 解析检查)、可信代理链客户端 IP |
 //! | [`pagination`] | 默认 | 分页偏移量 |
 //! | [`cryptocurrency`] | 默认 | 加密货币钱包地址格式校验 |
 //! | [`query_parser`] | `json` | Django 风格 `field__op` 过滤/排序解析 |
 //! | [`ddl_parser`] | 默认 | MySQL `CREATE TABLE` 解析(手写词法,零依赖) |
 //! | [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
+//! | [`eventbus`] | 默认 | 进程内事件总线:订阅/发布 + 中间件链 + 多总线管理器 |
 //! | [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
+//! | [`authorizer`] | 默认 | 授权管理器壳:Engine 抽象 + noop/deny-all(fail-closed) |
+//! | [`converter`] | 默认 | REST 路径 / operationID → `resource:action` 权限码 |
 //! | [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
 //! | [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
 //! | [`dateutil`] | `chrono` | 日粒度取整、区间判断 |
@@ -28,8 +33,14 @@
 //! | [`random`] | `rand` | 随机工具:加权/别名表/骰子/抖动/正态/手机号等 |
 //! | [`name_generator`] | `name-generator` | 随机昵称与中英日姓名(内嵌词库) |
 //! | [`slug`] | `slug` | URL slug(unicode 转写) |
+//! | [`ossutil`] | `ossutil` | 对象存储辅助:MIME/魔数→桶与扩展名、文件名策略、上传守卫 |
 //! | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 + 复杂度校验 |
 //! | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充、Encryptor/payload 信封 |
+//! | [`auditutil`] | `auditutil` | 审计日志:客户端 IP + 篡改证据链(prost 哈希 + ECDSA 签名) |
+//! | [`doctext`] | `doctext`(PDF 用 `doctext-pdf`) | txt/md/csv/html/docx/pdf 纯文本提取 |
+//! | [`fieldperm`] | `fieldperm` | 字段级读写裁剪(路径语义对齐 protoreflect 行为) |
+//! | [`mailer`] | `mailer` | SMTP 邮件:STARTTLS / 隐式 SSL,发件人显示名 |
+//! | [`notify`] | `notify` | 多渠道通知:webhook/IM/SMS/vendor push,SSRF 防线出站 |
 //! | [`jwt`] | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
 //! | [`bank_card`] | `bank-card` | Luhn 校验 + BIN 查询(内嵌记录) |
 //! | [`captcha`] | `captcha`(Redis 落地用 `captcha-redis`) | 图形验证码:四类文本驱动 + 滑块/点选/旋转,自绘渲染 |
@@ -43,17 +54,22 @@
 #![allow(clippy::module_inception)]
 
 pub mod aggregator;
+pub mod authorizer;
 pub mod byteutil;
+pub mod converter;
 pub mod cryptocurrency;
 pub mod ddl_parser;
+pub mod eventbus;
 pub mod eventloop;
 pub mod fsutil;
 pub mod id;
 pub mod maputil;
 pub mod mathutil;
+pub mod netutil;
 pub mod pagination;
 pub mod query_parser;
 pub mod sliceutil;
+pub mod sqlutil;
 pub mod stringcase;
 pub mod stringutil;
 
@@ -126,6 +142,8 @@ pub(crate) mod base64util {
     }
 }
 
+#[cfg(feature = "auditutil")]
+pub mod auditutil;
 #[cfg(feature = "captcha")]
 pub mod captcha;
 #[cfg(feature = "crypto")]
@@ -134,14 +152,23 @@ pub mod crypto;
 pub mod dateutil;
 #[cfg(feature = "distlock")]
 pub mod distlock;
+#[cfg(feature = "doctext")]
+pub mod doctext;
 #[cfg(feature = "fieldmask")]
+pub mod fieldperm;
 pub mod fieldmask;
 #[cfg(feature = "geoip")]
 pub mod geoip;
 #[cfg(feature = "jwt")]
 pub mod jwt;
+#[cfg(feature = "mailer")]
+pub mod mailer;
+#[cfg(feature = "notify")]
+pub mod notify;
 #[cfg(feature = "name-generator")]
 pub mod name_generator;
+#[cfg(feature = "ossutil")]
+pub mod ossutil;
 #[cfg(feature = "password")]
 pub mod password;
 #[cfg(feature = "rand")]

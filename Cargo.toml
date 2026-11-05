@@ -77,6 +77,29 @@ translator = ["dep:ureq", "dep:md-5", "dep:sha1", "dep:hmac", "dep:sha2", "dep:s
 distlock = []
 # 分布式锁的 Redis 落地(兼容 bsm/redislock 线上协议)。
 distlock-redis = ["distlock", "dep:redis", "dep:getrandom"]
+# SSRF 防护与可信代理链客户端 IP(纯 std,全局信任网段)。
+netutil = []
+# 进程内事件总线:订阅/发布 + 中间件链 + 多总线管理(纯 std)。
+eventbus = []
+# PostgreSQL 词法级 SQL 脱敏与表提取(纯 std)。
+sqlutil = []
+# REST 路径 / operationID 到 resource:action 权限码映射(纯 std)。
+converter = []
+# 对象存储辅助:MIME/魔数到桶与扩展名、文件名策略、上传守卫。
+ossutil = ["dep:getrandom", "dep:sha2", "dep:hmac"]
+# SMTP 邮件发送(STARTTLS + 隐式 SSL),基于 lettre。
+mailer = ["dep:lettre"]
+# 纯文本提取:txt/md/csv/html/docx(zip+xml);PDF 单独开 `doctext-pdf`。
+doctext = ["dep:zip", "dep:quick-xml"]
+doctext-pdf = ["doctext", "dep:pdf-extract"]
+# 审计日志:客户端 IP 提取 + 篡改证据链(确定性 prost 序列化哈希 + ECDSA-P256 DER 签名)。
+auditutil = ["dep:prost", "dep:p256", "dep:sha2"]
+# 授权管理器壳:Engine 抽象 + noop/deny-all 引擎 + 策略装载(fail-closed)。
+authorizer = []
+# 字段级读写裁剪(serde_json 路径语义,对齐上游 protoreflect 行为)。
+fieldperm = ["dep:serde_json"]
+# 多渠道通知:webhook/IM/邮件/SMS/vendor push,SSRF 守卫的 ureq 出站客户端。
+notify = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:hmac", "dep:sha2", "dep:sha1", "dep:jsonwebtoken", "dep:getrandom", "dep:chrono", "mailer"]
 
 # Everything above, minus the exotic bits.
 full = [
@@ -98,6 +121,17 @@ full = [
     "geoip",
     "translator",
     "distlock",
+    "netutil",
+    "eventbus",
+    "sqlutil",
+    "converter",
+    "ossutil",
+    "mailer",
+    "doctext",
+    "auditutil",
+    "authorizer",
+    "fieldperm",
+    "notify",
 ]
 
 [dependencies]
@@ -131,6 +165,11 @@ jsonwebtoken = { version = "9", optional = true }
 maxminddb = { version = "0.24", optional = true }
 encoding_rs = { version = "0.8", optional = true }
 ureq = { version = "2", optional = true }
+lettre = { version = "0.11.19", default-features = false, features = ["smtp-transport", "builder", "rustls-tls"], optional = true }
+zip = { version = "4.2", default-features = false, features = ["deflate"], optional = true }
+quick-xml = { version = "0.41", optional = true }
+pdf-extract = { version = "0.12", optional = true }
+prost = { version = "0.14", default-features = false, features = ["derive", "std"], optional = true }
 md-5 = { version = "0.11", optional = true }
 sha1 = { version = "0.10", optional = true }
 
