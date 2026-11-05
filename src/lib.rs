@@ -155,8 +155,9 @@ pub mod distlock;
 #[cfg(feature = "doctext")]
 pub mod doctext;
 #[cfg(feature = "fieldmask")]
-pub mod fieldperm;
 pub mod fieldmask;
+#[cfg(feature = "fieldperm")]
+pub mod fieldperm;
 #[cfg(feature = "geoip")]
 pub mod geoip;
 #[cfg(feature = "jwt")]
