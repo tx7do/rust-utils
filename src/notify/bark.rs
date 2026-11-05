@@ -226,6 +226,7 @@ mod tests {
 
     #[test]
     fn test_send_empty_target_is_not_configured() {
+        assert_eq!(service().name(), "bark");
         let err = service().send(&Message::new("", "t").with_content("c")).unwrap_err();
         assert!(err.is_not_configured(), "一次都没联系对端,按\"没尝试\"归类");
     }

@@ -459,4 +459,10 @@ O5je4GHHY3J6h7rIU4EwrJFBIHkahS3qSGmg0PSijUb0HDr4SDxSr7/UVSas8734
         assert_eq!(svc.token_uri(), "http://127.0.0.1:1/token");
         assert_eq!(Service::name(&svc), "fcm");
     }
+
+    /// OAuth2 scope 钉死:token 换发按它申请,漂移会直接被 Google 拒。
+    #[test]
+    fn test_fcm_scope_constant() {
+        assert_eq!(FCM_SCOPE, "https://www.googleapis.com/auth/firebase.messaging");
+    }
 }

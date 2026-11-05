@@ -240,6 +240,7 @@ mod tests {
     #[test]
     fn test_missing_app_token_is_not_configured() {
         let svc = Service::new(true, Config::default());
+        assert_eq!(svc.name(), "wxpusher");
         let err = svc.build_request(&Message::new("UID_x", "").with_content("c")).unwrap_err();
         assert!(err.is_not_configured());
     }
@@ -324,5 +325,13 @@ mod tests {
     fn test_status_error() {
         let err = status_error(500, "boom");
         assert!(err.to_string().contains("500") && err.to_string().contains("boom"));
+    }
+
+    #[test]
+    fn test_content_type_constants() {
+        // 正文形态档位:1 文本 / 2 HTML / 3 Markdown(对齐上游 ContentText/ContentHTML/ContentMarkdown)。
+        assert_eq!(CONTENT_TEXT, 1);
+        assert_eq!(CONTENT_HTML, 2);
+        assert_eq!(CONTENT_MARKDOWN, 3);
     }
 }

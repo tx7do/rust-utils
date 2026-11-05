@@ -499,6 +499,39 @@ mod tests {
     }
 
     #[test]
+    fn test_map_ureq_error_and_guarded_client() {
+        // HTTP 状态错误一律归 Delivery
+        let status = ureq::Error::Status(403, ureq::Response::new(403, "Forbidden", "").unwrap());
+        let e = map_ureq_error(status);
+        assert!(matches!(e, NotifyError::Delivery(_)));
+        assert!(!e.is_blocked_target());
+
+        // 受守卫客户端打环回:resolver 在连接前拦截,错误文案携带
+        // "ssrf guard",经 map_ureq_error 归 BlockedTarget(不出网)
+        let agent = new_client(false);
+        let err = agent
+            .post("http://127.0.0.1:1/hook")
+            .send_string("{}")
+            .unwrap_err();
+        let e = map_ureq_error(err);
+        assert!(e.is_blocked_target(), "got: {e}");
+
+        // allow_private 时守卫关闭:错误不再是 BlockedTarget(端口 1 连接拒绝)
+        let agent = new_client(true);
+        let result = agent.post("http://127.0.0.1:1/hook").send_string("{}");
+        if let Err(err) = result {
+            assert!(!map_ureq_error(err).is_blocked_target());
+        }
+
+        // 超时常量与环境变量名
+        assert_eq!(GUARDED_CLIENT_TIMEOUT, std::time::Duration::from_secs(10));
+        assert_eq!(GUARDED_DIAL_TIMEOUT, std::time::Duration::from_secs(5));
+        assert_eq!(ENV_ALLOW_PRIVATE_TARGET, "NOTIFY_ALLOW_PRIVATE_TARGET");
+        // 开关只认精确的 "1";只读不写,不扰动并行测试环境
+        let _ = allow_private_target();
+    }
+
+    #[test]
     fn test_error_sentinels_and_message() {
         let e = NotifyError::NotConfigured("x".into());
         assert!(e.is_not_configured());

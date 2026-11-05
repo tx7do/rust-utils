@@ -252,4 +252,11 @@ mod tests {
         assert!(err.to_string().contains("registration_id is empty"), "{err}");
         assert_eq!(Service::name(&svc), "oppo");
     }
+
+    /// 官方端点钉死:key/secret 鉴权与单播通知两段,对齐上游 OppoAuthURL/OppoSendURL。
+    #[test]
+    fn test_oppo_endpoint_constants() {
+        assert_eq!(OPPO_AUTH_URL, "https://push.oppomobile.com/server/v1/message/auth/aliyun");
+        assert_eq!(OPPO_SEND_URL, "https://push.oppomobile.com/server/v1/message/notification/unicast");
+    }
 }

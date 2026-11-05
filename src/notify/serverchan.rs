@@ -220,6 +220,7 @@ mod tests {
     #[test]
     fn test_missing_send_key_is_not_configured() {
         let svc = Service::new(true, Config::default());
+        assert_eq!(svc.name(), "serverchan");
         let err = svc.build_request(&Message::new("", "").with_content("c")).unwrap_err();
         assert!(err.is_not_configured());
     }

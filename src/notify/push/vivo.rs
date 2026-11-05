@@ -286,4 +286,10 @@ mod tests {
         assert!(err.to_string().contains("regId is empty"), "{err}");
         assert_eq!(Service::name(&svc), "vivo");
     }
+
+    /// 官方单播端点钉死(对齐上游 VivoSendURL)。
+    #[test]
+    fn test_vivo_send_url_constant() {
+        assert_eq!(VIVO_SEND_URL, "https://push-api.vivo.com.cn/message/notify/unicast");
+    }
 }

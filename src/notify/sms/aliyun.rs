@@ -386,4 +386,11 @@ mod tests {
         let err = parse_answer(200, "<html>gateway</html>").unwrap_err();
         assert!(err.to_string().contains("not JSON"));
     }
+
+    /// 官方 Endpoint 与缺省 Region 钉死(尾部斜杠是上游口径,签名只串 path 不含 host)。
+    #[test]
+    fn test_aliyun_sms_endpoint_constants() {
+        assert_eq!(ALIYUN_SMS_ENDPOINT, "https://dysmsapi.aliyuncs.com/");
+        assert_eq!(ALIYUN_SMS_DEFAULT_REGION, "cn-hangzhou");
+    }
 }

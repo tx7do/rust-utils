@@ -802,6 +802,17 @@ fn hex_lower(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_strip_line_breaks() {
+        // CR/LF 注入剥离:审计字段的日志注入防线
+        assert_eq!(strip_line_breaks("alice\r\nbob"), "alicebob");
+        assert_eq!(strip_line_breaks("no-breaks"), "no-breaks");
+        assert_eq!(strip_line_breaks("\r\n"), "");
+        assert_eq!(strip_line_breaks(""), "");
+        // 其他控制字符与内容不受影响
+        assert_eq!(strip_line_breaks("a\tb\rc\nd\u{0}"), "a\tbcd\u{0}");
+    }
+
     use p256::ecdsa::signature::hazmat::PrehashVerifier;
     use p256::ecdsa::signature::Verifier;
 

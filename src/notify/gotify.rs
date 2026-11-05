@@ -218,6 +218,7 @@ mod tests {
     #[test]
     fn test_missing_config_is_not_configured() {
         let svc = Service::new(true, Config { server_url: "https://example.com".into(), ..Config::default() });
+        assert_eq!(svc.name(), "gotify");
         let err = svc.build_request(&Message::new("", "t").with_content("c")).unwrap_err();
         assert!(err.is_not_configured(), "缺 app_token 在拨号之前就该拦下");
     }

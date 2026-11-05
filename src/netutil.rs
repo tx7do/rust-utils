@@ -684,6 +684,18 @@ pub fn lookup_and_check_host(host: &str) -> Result<Vec<IpAddr>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_request_info_get_header() {
+        let req = RequestInfo::new("10.0.0.1:12345")
+            .with_header("X-Forwarded-For", "1.2.3.4")
+            .with_header("User-Agent", "test/1.0");
+        // 键名不区分大小写(存储约定为小写)
+        assert_eq!(req.get_header("x-forwarded-for"), Some("1.2.3.4"));
+        assert_eq!(req.get_header("X-FORWARDED-FOR"), Some("1.2.3.4"));
+        assert_eq!(req.get_header("user-agent"), Some("test/1.0"));
+        assert_eq!(req.get_header("missing"), None);
+    }
+
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::sync::Mutex;
 

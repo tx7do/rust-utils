@@ -242,6 +242,7 @@ mod tests {
     fn test_config_issues() {
         // 缺 app_token 在拨号之前就该拦下。
         let svc = Service::new(true, Config::default());
+        assert_eq!(svc.name(), "pushover");
         let err = svc.build_request(&Message::new("user-key", "").with_content("c")).unwrap_err();
         assert!(err.is_not_configured());
 

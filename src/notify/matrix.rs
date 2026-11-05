@@ -255,6 +255,7 @@ mod tests {
     #[test]
     fn test_missing_config_is_not_configured() {
         let svc = Service::new(true, Config { server_url: "https://example.org".into(), ..Config::default() });
+        assert_eq!(svc.name(), "matrix");
         let err = svc.build_request(&Message::new("!r:s.org", "").with_content("c")).unwrap_err();
         assert!(err.is_not_configured());
     }

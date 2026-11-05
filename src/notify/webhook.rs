@@ -1356,4 +1356,12 @@ mod tests {
         }
         assert_eq!(query_escape("a b"), "a+b");
     }
+
+    #[test]
+    fn test_signature_header_and_user_agent_constants() {
+        // CUSTOM 风格签名头名对端要照收;UA 是本 crate 品牌串(Go 上游为 go-utils-notify/1.0)。
+        assert_eq!(HEADER_SIGNATURE, "X-Gw-Signature");
+        assert_eq!(HEADER_TIMESTAMP, "X-Gw-Timestamp");
+        assert_eq!(DEFAULT_USER_AGENT, "rust-utils-notify/1.0");
+    }
 }

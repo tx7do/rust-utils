@@ -760,4 +760,11 @@ mod tests {
         assert_eq!(extract_tables("SELECT * FROM t AS 别名"), ["t"]);
         assert_eq!(mask_sql("SELECT '喵'"), "SELECT ***");
     }
+
+    /// 脱敏占位符与策略标识钉死:调用方会随审计记录落库留痕,漂移会破坏对账。
+    #[test]
+    fn test_mask_constants() {
+        assert_eq!(MASK_TOKEN, "***");
+        assert_eq!(MASKING_RULES, "sql_literals:v1");
+    }
 }

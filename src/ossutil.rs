@@ -1748,4 +1748,29 @@ mod tests {
         assert!(extensions_by_type("text/plain; charset=utf-8").is_some());
         assert!(extensions_by_type("application/x-nope").is_none());
     }
+
+    #[test]
+    fn test_size_bucket_and_mime_constants() {
+        // 直传/SSRF 下载上限 50 MiB(52_428_800 字节)。
+        assert_eq!(MAX_UPLOAD_SIZE, 52_428_800);
+        assert_eq!(MAX_DOWNLOAD_SIZE, 52_428_800);
+
+        // 五个业务桶名。
+        assert_eq!(BUCKET_IMAGES, "images");
+        assert_eq!(BUCKET_VIDEOS, "videos");
+        assert_eq!(BUCKET_AUDIOS, "audios");
+        assert_eq!(BUCKET_DOCS, "docs");
+        assert_eq!(BUCKET_FILES, "files");
+
+        // MIME 白名单不缺项:前缀 3 条(首 image/ 尾 audio/),精确表 16 条(首 text/plain 尾 pptx)。
+        assert_eq!(ALLOWED_MIME_PREFIXES.len(), 3);
+        assert_eq!(ALLOWED_MIME_PREFIXES[0], "image/");
+        assert_eq!(ALLOWED_MIME_PREFIXES[ALLOWED_MIME_PREFIXES.len() - 1], "audio/");
+        assert_eq!(ALLOWED_EXACT_MIME_TYPES.len(), 16);
+        assert_eq!(ALLOWED_EXACT_MIME_TYPES[0], "text/plain");
+        assert_eq!(
+            ALLOWED_EXACT_MIME_TYPES[ALLOWED_EXACT_MIME_TYPES.len() - 1],
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        );
+    }
 }

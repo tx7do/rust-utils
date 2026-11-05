@@ -205,4 +205,10 @@ mod tests {
         assert!(err.to_string().contains("regId is empty"), "{err}");
         assert_eq!(Service::name(&svc), "xiaomi");
     }
+
+    /// 官方 regId 单播端点钉死(对齐上游 XiaomiSendURL)。
+    #[test]
+    fn test_xiaomi_send_url_constant() {
+        assert_eq!(XIAOMI_SEND_URL, "https://api.xmpush.xiaomi.com/v2/message/regid");
+    }
 }

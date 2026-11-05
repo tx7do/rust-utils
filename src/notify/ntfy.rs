@@ -321,4 +321,13 @@ mod tests {
         let err = status_error(403, "unauthorized");
         assert!(err.to_string().contains("403") && err.to_string().contains("unauthorized"));
     }
+
+    #[test]
+    fn test_priority_constants() {
+        // 优先级档位:0 默认,1 最低,4 高,5 最高(对齐上游 PriorityMin/Default/High/Max)。
+        assert_eq!(PRIORITY_DEFAULT, 0);
+        assert_eq!(PRIORITY_MIN, 1);
+        assert_eq!(PRIORITY_HIGH, 4);
+        assert_eq!(PRIORITY_MAX, 5);
+    }
 }

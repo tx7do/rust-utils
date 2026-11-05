@@ -333,4 +333,12 @@ mod tests {
         assert!(matches!(parse_answer(502, "bad gateway").unwrap_err(), NotifyError::Delivery(_)));
         assert!(parse_answer(200, "<html/>").unwrap_err().to_string().contains("not JSON"));
     }
+
+    /// Host/Service/缺省 Region 钉死:TC3 签名串里含 Host 与 Service,漂移会全量签名失败。
+    #[test]
+    fn test_tencent_sms_constants() {
+        assert_eq!(TENCENT_SMS_HOST, "sms.tencentcloudapi.com");
+        assert_eq!(TENCENT_SMS_SERVICE, "sms");
+        assert_eq!(TENCENT_SMS_DEFAULT_REGION, "ap-guangzhou");
+    }
 }
