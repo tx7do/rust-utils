@@ -2,76 +2,76 @@
 
 # rust-utils
 
-[English](./README_en.md) | **中文** | [日本語](./README_ja.md)
+**English** | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md)
 
 </div>
 
 ---
 
-Rust 工具箱:命名风格转换、切片/映射辅助、雪花 ID、订单号、查询条件解析、MySQL DDL 解析、优先级事件循环、数据回填、密码哈希、AES/HMAC、JWT、随机昵称生成、银行卡 BIN 查询、图形验证码、IP 归属地、机器翻译、分布式锁、国密等。
+A Rust toolbox: case-style conversion, slice/map helpers, Snowflake IDs, order IDs, query-condition parsing, MySQL DDL parsing, a priority event loop, relation backfill, password hashing, AES/HMAC, JWT, random nickname generation, bank-card BIN lookup, image CAPTCHA, IP geolocation, machine translation, distributed locks, Chinese national crypto (SM), and more.
 
-设计原则:
+Design principles:
 
-- **核心模块零依赖**(只依赖 `std`),重依赖的能力(时间、随机、加密、JWT 等)通过 feature 按需启用;
-- 全 crate `#![forbid(unsafe_code)]`;
-- 边界读取(geoip、ddl_parser 等)对越界与畸形输入一律返回错误或空结果,不做 panic。
+- **Core modules are zero-dependency** (`std` only); capability areas with heavier dependencies (time, randomness, crypto, JWT, …) are enabled per-feature;
+- The whole crate carries `#![forbid(unsafe_code)]`;
+- Boundary reads (geoip, ddl_parser, …) return errors or empty results on out-of-range or malformed input — never panic.
 
-## 使用
+## Usage
 
 ```toml
 [dependencies]
 rust-utils = "0.1"
 
-# 按需启用 feature,例如:
+# Enable features as needed, e.g.:
 # rust-utils = { version = "0.1", features = ["chrono", "rand", "password"] }
-# 或全量:features = ["full"]
+# or everything: features = ["full"]
 ```
 
-## 模块一览
+## Modules
 
-| 模块 | feature | 说明 |
+| Module | Feature | Description |
 |---|---|---|
-| [`byteutil`] | 默认 | 整数/字节互转、ASCII 大小写 |
-| [`stringcase`] | 默认 | 驼峰/蛇形/烤肉串转换,识别缩写词与数字段 |
-| [`stringutil`] | 默认 | 宽松数值/布尔解析、JSON 字段值重写 |
-| [`sliceutil`] | 默认 | 查找族、交集/差集/并集、去重、分块 |
-| [`sqlutil`] | 默认 | PostgreSQL 词法级 SQL 脱敏(MaskSQL)与表提取(ExtractTables) |
-| [`maputil`] | 默认 | keys/values/merge/drop/filter |
-| [`mathutil`] | 默认 | 统计量、手写正态分布(Gaussian)、Erfc/Ierfc |
-| [`netutil`] | 默认 | SSRF 防护(URL 校验 + 黑名单网段 + DNS 解析检查)、可信代理链客户端 IP |
-| [`pagination`] | 默认 | 分页偏移量 |
-| [`cryptocurrency`] | 默认 | 加密货币钱包地址格式校验 |
-| [`query_parser`] | `json`(JSON 形式需要) | Django 风格 `field__op` 过滤/排序解析 |
-| [`ddl_parser`] | 默认 | MySQL `CREATE TABLE` 解析(手写词法,零依赖) |
-| [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
-| [`eventbus`] | 默认 | 进程内事件总线:订阅/发布 + 中间件链 + 多总线管理器 |
-| [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
-| [`converter`] | 默认 | REST 路径 / operationID → `resource:action` 权限码 |
-| [`authorizer`] | 默认 | 授权管理器壳:Engine 抽象 + noop/deny-all(fail-closed) |
-| [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
-| [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
-| [`dateutil`] | `chrono` | 日粒度取整、区间判断 |
-| [`timeutil`] | `chrono` | 今天/昨天/本月/上月区间、时间差、格式转换 |
-| [`random`] | `rand` | 随机工具:加权/别名表/骰子/抖动/正态/手机号等 |
-| [`name_generator`] | `name-generator` | 随机昵称与中英日姓名(内嵌 2.5 MB 词库) |
-| [`slug`] | `slug` | URL slug(unicode 转写) |
-| [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 + 复杂度校验 |
-| [`ossutil`] | `ossutil` | 对象存储辅助:MIME/魔数→桶与扩展名、文件名策略、上传守卫 |
-| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充、Encryptor(`enc:` 前缀)/payload 信封/数据签名 |
-| [`auditutil`] | `auditutil` | 审计日志:客户端 IP + 篡改证据链(确定性哈希 + ECDSA-P256 签名) |
-| [`doctext`] | `doctext`(PDF 用 `doctext-pdf`) | txt/md/csv/html/docx/pdf 纯文本提取 |
-| [`fieldperm`] | `fieldperm` | 字段级读写裁剪(路径语义对齐 protoreflect 行为) |
-| [`mailer`] | `mailer` | SMTP 邮件:STARTTLS / 隐式 SSL,发件人显示名 |
-| [`notify`] | `notify` | 多渠道通知:webhook/IM/邮件/SMS/vendor push,SSRF 防线出站 |
-| [`jwt`] | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
-| [`bank_card`] | `bank-card` | Luhn 校验 + BIN 查询(内嵌 2013 条记录) |
-| [`captcha`] | `captcha` | 图形验证码:数字/字母/算术/中文四类文本驱动 + 滑块/点选/旋转,自绘渲染,输出 JSON 与 base64Captcha 前端组件兼容,存储层可插拔(`captcha-redis` 提供 Redis 落地) |
-| [`fieldmask`] | `fieldmask` | 字段掩码:嵌套掩码树构建 + filter/prune/overwrite/validate/路径归一化,作用于 `serde_json::Value` |
-| [`tls`] | `tls` | TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
-| [`geoip`] | `geoip` | IP 归属地查询三后端:qqwry(GB18030、省/市切分)、ip2region xdb v2(向量索引+段索引二分、查询器池)、MaxMind mmdb 读取器;数据文件由调用方加载 |
-| [`translator`] | `translator` | 翻译器四后端:百度(MD5 签名)/阿里(RPC 签名)/谷歌(v1 裸端点、v2/v3 REST)/火山(HMAC-SHA256 派生链);单次请求不自动重试,请求构造与签名可离线验证 |
-| [`distlock`] | `distlock` | 分布式锁:Locker/Lock 抽象与获取选项(Redis 落地用 `distlock-redis`,兼容 bsm/redislock 线上协议;暂未提供 etcd 后端) |
-| [`sm`] | `sm` | 国密 SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/SM4-CBC |
+| [`byteutil`] | default | Integer/byte conversions, ASCII case flips |
+| [`stringcase`] | default | camel/snake/kebab conversion, acronym- and digit-segment aware |
+| [`stringutil`] | default | Lenient numeric/boolean parsing, JSON field-value rewriting |
+| [`sliceutil`] | default | Find family, intersection/difference/union, dedup, chunking |
+| [`sqlutil`] | 默认 | Lexical SQL masking (MaskSQL) and table extraction (ExtractTables) for PostgreSQL-flavored SQL |
+| [`maputil`] | default | keys/values/merge/drop/filter |
+| [`mathutil`] | default | Statistics, hand-written Gaussian, Erfc/Ierfc |
+| [`netutil`] | 默认 | SSRF protection (URL validation + blocked CIDRs + DNS resolve check), spoof-proof client IP via trusted proxy chain |
+| [`pagination`] | default | Pagination offsets |
+| [`cryptocurrency`] | default | Crypto wallet address format validation |
+| [`query_parser`] | `json` (for the JSON form) | Django-style `field__op` filter/sort parsing |
+| [`ddl_parser`] | default | MySQL `CREATE TABLE` parsing (hand-written lexer, zero deps) |
+| [`eventloop`] | default | Single-threaded priority event loop, with a frame-driven mode |
+| [`eventbus`] | 默认 | In-process event bus: subscribe/publish + middleware chain + multi-bus manager |
+| [`aggregator`] | default | Relation backfill (lists/trees) + parallel executor + cached batch loader |
+| [`converter`] | 默认 | REST path / operationID → `resource:action` permission code |
+| [`authorizer`] | 默认 | Authorization manager shell: Engine abstraction + noop/deny-all (fail-closed) |
+| [`id`] | default (`uuid` optional) | Snowflake IDs, order IDs, machine codes (built-in SHA-256), UUID v4/v7 |
+| [`fsutil`] | default (`glob` optional) | File/path helpers |
+| [`dateutil`] | `chrono` | Day-granularity truncation, range checks |
+| [`timeutil`] | `chrono` | Today/yesterday/this-month/last-month ranges, time differences, format conversion |
+| [`random`] | `rand` | Random toolkit: weighted choice/alias table/dice/jitter/gaussian/phone numbers, etc. |
+| [`name_generator`] | `name-generator` | Random nicknames and Chinese/English/Japanese names (embedded 2.5 MB dictionaries) |
+| [`slug`] | `slug` | URL slugs (unicode transliteration) |
+| [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA hashing strategies + complexity validation |
+| [`ossutil`] | `ossutil` | Object-storage helpers: MIME/magic-byte → bucket & extension mapping, filename strategies, upload guards |
+| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2, PKCS#7 padding, Encryptor (`enc:` prefix) / payload envelope / data signing |
+| [`auditutil`] | `auditutil` | Audit log: client IP + tamper-evidence chain (deterministic hashing + ECDSA-P256 signing) |
+| [`doctext`] | `doctext` (PDF via `doctext-pdf`) | Plain-text extraction from txt/md/csv/html/docx/pdf |
+| [`fieldperm`] | `fieldperm` | Field-level read/write trimming (path semantics aligned with the protoreflect behavior) |
+| [`mailer`] | `mailer` | SMTP mail: STARTTLS / implicit SSL, sender display name |
+| [`notify`] | `notify` | Multi-channel notification: webhook/IM/email/SMS/vendor push, SSRF-guarded outbound |
+| [`jwt`] | `jwt` | JWT generate/parse/verify/refresh (HS256) |
+| [`bank_card`] | `bank-card` | Luhn validation + BIN lookup (2,013 embedded records) |
+| [`captcha`] | `captcha` | Image CAPTCHA: digit/alphanumeric/arithmetic/Chinese text drivers + slide/click/rotate, self-drawn rendering, JSON output compatible with the base64Captcha front-end component, pluggable storage (`captcha-redis` adds a Redis store) |
+| [`fieldmask`] | `fieldmask` | Field masks: nested mask-tree building + filter/prune/overwrite/validate/path normalization, over `serde_json::Value` |
+| [`tls`] | `tls` | TLS certificate loading: rustls server/client configs assembled from PEM files/bytes (one-way/mutual) |
+| [`geoip`] | `geoip` | IP geolocation with three backends: qqwry (GB18030, province/city splitting), ip2region xdb v2 (vector index + segment bisection, searcher pool), MaxMind mmdb reader; data files are loaded by the caller |
+| [`translator`] | `translator` | Translators for four backends: Baidu (MD5 signature) / Alibaba (RPC signature) / Google (bare v1 endpoint, v2/v3 REST) / Volc (HMAC-SHA256 derivation chain); one request per call, no automatic retry; request construction and signatures are offline-verifiable |
+| [`distlock`] | `distlock` | Distributed locks: Locker/Lock abstractions with acquire options (Redis store via `distlock-redis`, wire-compatible with the bsm/redislock protocol; no etcd backend yet) |
+| [`sm`] | `sm` | Chinese national crypto SM2 (C1C3C2/ASN.1 encryption & signatures) / SM3 / SM4-CBC |
 
 [`byteutil`]: src/byteutil.rs
 [`stringcase`]: src/stringcase.rs
@@ -115,9 +115,9 @@ rust-utils = "0.1"
 [`translator`]: src/translator.rs
 [`distlock`]: src/distlock.rs
 
-## 示例
+## Examples
 
-### 命名风格转换(能识别缩写词和数字段)
+### Case conversion (acronym- and digit-segment aware)
 
 ```rust
 use rust_utils::stringcase;
@@ -128,7 +128,7 @@ assert_eq!(stringcase::upper_camel_case("parse_url.do_parse"), "ParseUrlDoParse"
 assert_eq!(stringcase::kebab_case("Hello World!"), "hello-world");
 ```
 
-### 雪花 ID 与订单号
+### Snowflake IDs and order IDs
 
 ```rust
 use rust_utils::id;
@@ -136,13 +136,13 @@ use rust_utils::id;
 let node = id::SnowflakeNode::new(1).unwrap();
 let a = node.generate();
 let b = node.generate();
-assert!(b > a); // 趋势递增
+assert!(b > a); // monotonically increasing
 
-let order = id::generate_order_id_with_random("ORD", None);      // ORD + 14位时间戳 + 随机数
-let order = id::generate_order_id_with_increase_index("ORD", None); // ORD + 14位时间戳 + 自增索引
+let order = id::generate_order_id_with_random("ORD", None);         // ORD + 14-digit timestamp + random digits
+let order = id::generate_order_id_with_increase_index("ORD", None); // ORD + 14-digit timestamp + incrementing index
 ```
 
-### 查询条件解析
+### Query condition parsing
 
 ```rust
 use rust_utils::query_parser;
@@ -155,7 +155,7 @@ query_parser::parse_filter_query_string(
 // got: [("name", "icontains", "张"), ("age", "gte", "18")]
 ```
 
-### MySQL DDL 解析
+### MySQL DDL parsing
 
 ```rust
 use rust_utils::ddl_parser;
@@ -173,7 +173,7 @@ assert_eq!(table.columns[1].comment, "用户名");
 assert_eq!(table.engine, "innodb");
 ```
 
-### 优先级事件循环
+### Priority event loop
 
 ```rust
 use rust_utils::eventloop::{new_request_event, EventLoop, EventProcessor, EventResult};
@@ -193,7 +193,7 @@ let seen = Arc::new(Mutex::new(Vec::new()));
 let loop_ = EventLoop::new(16, Collector(seen.clone()), false);
 loop_.start();
 
-// 请求事件带回执,便于等待处理完成
+// request events carry a receipt, handy for waiting on completion
 let (ev, rx) = new_request_event("ping", Some("hello".to_string()));
 loop_.submit(ev).unwrap();
 let reply = rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -202,7 +202,7 @@ loop_.stop();
 assert_eq!(reply.data.as_deref(), Some("hello"));
 ```
 
-### 关联数据回填(避免 N+1)
+### Relation backfill (avoids N+1)
 
 ```rust
 use rust_utils::aggregator::populate;
@@ -217,38 +217,34 @@ populate(&mut orders, &users, |o| o.id, |o, name| o.user_name = Some(name));
 assert_eq!(orders[0].user_name.as_deref(), Some("张三"));
 ```
 
-### 密码哈希
+### Password hashing
 
 ```rust
 use rust_utils::password::{Argon2Crypto, Crypto};
 
 let algo = Argon2Crypto;
-let hash = algo.encrypt("s3cret!").unwrap();       // 标准 PHC 格式
+let hash = algo.encrypt("s3cret!").unwrap();       // standard PHC format
 assert!(algo.verify("s3cret!", &hash).unwrap());
 ```
 
-### 验证码服务
+### CAPTCHA service
 
-七种驱动:数字/字母/算术/中文四类文本驱动,加滑块/点选/旋转三类
-交互驱动;渲染为程序自绘,不依赖外部图片素材(字形资产说明见
-`assets/captcha/README.md`)。文本驱动返回 PNG 数据 URI,交互驱动
-返回 JSON,结构与 base64Captcha 前端组件一致。
+Seven drivers: four text drivers (digit/alphanumeric/arithmetic/Chinese) plus three interactive ones (slide/click/rotate); rendering is fully programmatic, with no external image assets (see `assets/captcha/README.md` for glyph asset notes). Text drivers return PNG data URIs; interactive drivers return JSON compatible with the base64Captcha front-end component.
 
 ```rust
 use rust_utils::captcha::{Captcha, Config, DriverKind};
 
 let cap = Captcha::with_config(Config::with_driver(DriverKind::Digit));
 let (id, b64, answer) = cap.generate().unwrap();
-// 文本驱动返回 PNG 数据 URI;滑块/点选/旋转驱动返回 JSON
-// (内嵌 JPEG 主图 / PNG 缩略图)
+// text drivers return a PNG data URI; slide/click/rotate drivers return
+// JSON (with embedded JPEG master / PNG thumbnail images)
 assert!(b64.starts_with("data:image/png;base64,"));
-assert!(cap.verify(&id, &answer).unwrap()); // 一次性校验
+assert!(cap.verify(&id, &answer).unwrap()); // one-shot verification
 ```
 
-Redis 存储启用 `captcha-redis` feature 后,把 `Captcha::with_store(MemoryStore::new(), cfg)`
-换成 `RedisStore::new("redis://127.0.0.1/")?` 即可,服务层 API 完全一致。
+With the `captcha-redis` feature enabled, swap `Captcha::with_store(MemoryStore::new(), cfg)` for `RedisStore::new("redis://127.0.0.1/")?` — the service-level API stays exactly the same.
 
-### 缓存式批量加载
+### Cached batch loading
 
 ```rust
 use rust_utils::aggregator::Loader;
@@ -263,15 +259,15 @@ let loader = Loader::new(move |keys: &[u32]| {
 
 let got = loader.load_many(&[1, 2, 3]);
 assert_eq!(got[&2].as_ref(), &20);
-loader.load_many(&[2, 3]); // 全部命中缓存,不再取数
+loader.load_many(&[2, 3]); // all cache hits, no refetch
 assert_eq!(calls.load(Ordering::Relaxed), 1);
 ```
 
-## 开发
+## Development
 
 ```bash
-cargo test              # 核心模块测试(零依赖)
-cargo test --all-features  # 全部模块测试(297 单测 + 28 文档测试,其中 1 例标记 ignore 不执行)
+cargo test                 # core-module tests (zero-dependency)
+cargo test --all-features  # all-module tests (297 unit + 28 doc tests, 1 marked ignore)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```
