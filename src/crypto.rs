@@ -1,7 +1,9 @@
 //! 对称加密与哈希原语,feature `crypto`。
 //!
 //! 覆盖 AES-CBC / AES-GCM / HMAC-SHA256 / SHA-2 / RSA / ECDSA / ECDH;
-//! 国密 SM2/SM3/SM4 由 `sm` 模块(feature `sm`)提供。
+//! 应用层门面:[`Encryptor`](`enc:` 前缀 AES-256-GCM)、全局单例、
+//! payload 整包加密信封、HMAC 数据签名;国密 SM2/SM3/SM4 由 `sm`
+//! 模块(feature `sm`)提供。
 //!
 //! ```
 //! use rust_utils::crypto::{AesGcmCipher, Cipher};
@@ -340,7 +342,8 @@ impl RsaCipher {
 
 /// ECDSA P-256 数字签名。
 pub struct EcdsaCipher {
-    signing: p256::ecdsa::SigningKey,
+    signing: Option<p256::ecdsa::SigningKey>,
+    verifying: p256::ecdsa::VerifyingKey,
 }
 
 impl Default for EcdsaCipher {
@@ -353,15 +356,38 @@ impl EcdsaCipher {
     /// 生成新的 P-256 密钥对。
     pub fn new() -> Result<Self, String> {
         let signing = p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
-        Ok(EcdsaCipher { signing })
+        let verifying = *signing.verifying_key();
+        Ok(EcdsaCipher {
+            signing: Some(signing),
+            verifying,
+        })
+    }
+
+    /// 从 SEC1 非压缩公钥构造仅验签的实例:可验任意持私钥方的签名,
+    /// [`EcdsaCipher::sign`] 返回 Err。
+    pub fn from_public_key_bytes(public_key: &[u8]) -> Result<Self, String> {
+        let point = p256::EncodedPoint::from_bytes(public_key)
+            .map_err(|e| format!("ecdsa public key: {e}"))?;
+        let verifying = p256::ecdsa::VerifyingKey::from_encoded_point(&point)
+            .map_err(|_| "ecdsa public key: invalid point".to_string())?;
+        Ok(EcdsaCipher {
+            signing: None,
+            verifying,
+        })
     }
 
     /// 签名,输出 `base64(r)$base64(s)`(r/s 固定 32 字节)。
-    pub fn sign(&self, data: &[u8]) -> String {
+    /// 仅验签构造的实例无私钥,返回 Err。
+    pub fn sign(&self, data: &[u8]) -> Result<String, String> {
         use p256::ecdsa::signature::Signer;
-        let sig: p256::ecdsa::Signature = self.signing.sign(data);
+        let signing = self.signing.as_ref().ok_or("no signing key")?;
+        let sig: p256::ecdsa::Signature = signing.sign(data);
         let bytes = sig.to_bytes();
-        format!("{}${}", to_base64(&bytes[..32]), to_base64(&bytes[32..]))
+        Ok(format!(
+            "{}${}",
+            to_base64(&bytes[..32]),
+            to_base64(&bytes[32..])
+        ))
     }
 
     /// 验签;r/s 分量不足 32 字节时左侧补零,故去零的变长格式同样接受。
@@ -378,17 +404,12 @@ impl EcdsaCipher {
         sig[32..].copy_from_slice(&s);
         let sig = p256::ecdsa::Signature::from_slice(&sig)
             .map_err(|e| format!("invalid signature: {e}"))?;
-        let verifying = p256::ecdsa::VerifyingKey::from(&self.signing);
-        Ok(verifying.verify(data, &sig).is_ok())
+        Ok(self.verifying.verify(data, &sig).is_ok())
     }
 
     /// 公钥 SEC1 非压缩编码(65 字节,`04 || X || Y`)。
     pub fn public_key_bytes(&self) -> Vec<u8> {
-        self.signing
-            .verifying_key()
-            .to_encoded_point(false)
-            .as_bytes()
-            .to_vec()
+        self.verifying.to_encoded_point(false).as_bytes().to_vec()
     }
 
     /// 算法名。
@@ -459,9 +480,315 @@ impl EcdhCipher {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 应用层加密门面:Encryptor / 全局单例 / payload 信封 / 数据签名
+// ---------------------------------------------------------------------------
+
+/// 密文前缀:`enc:`。带此前缀的字符串视为 [`Encryptor`] 密文。
+pub const ENCRYPTED_PREFIX: &str = "enc:";
+
+/// payload 信封:整包 JSON 加密后存放的键。
+pub const ENCRYPTED_CONFIG_KEY: &str = "_encrypted_config";
+/// payload 信封:是否已加密的标记键。
+pub const IS_ENCRYPTED_KEY: &str = "_is_encrypted";
+
+/// AES-256-GCM 应用层加密器:任意长度口令经 SHA-256 派生 32 字节密钥,
+/// 输出 `enc:` + base64(nonce ‖ ciphertext ‖ tag)。
+/// 未带前缀的输入在解密时原样返回(向后兼容明文)。
+pub struct Encryptor {
+    /// `None` 表示未启用(直通模式, encrypt/decrypt 原样返回)。
+    key: Option<[u8; 32]>,
+}
+
+impl Encryptor {
+    /// 以口令构造加密器(任意长度非空口令,SHA-256 派生密钥)。
+    pub fn new(key: &str) -> Result<Self, String> {
+        if key.is_empty() {
+            return Err("invalid key: empty".to_string());
+        }
+        Ok(Encryptor {
+            key: Some(Sha256::digest(key.as_bytes()).into()),
+        })
+    }
+
+    /// 未启用的直通加密器(仅供全局单例在 disabled 时使用)。
+    fn disabled() -> Self {
+        Encryptor { key: None }
+    }
+
+    fn gcm(&self) -> Result<aes_gcm::Aes256Gcm, String> {
+        use aes_gcm::KeyInit as _;
+        let key = self.key.as_ref().ok_or("encryptor disabled")?;
+        aes_gcm::Aes256Gcm::new_from_slice(key).map_err(|e| format!("init gcm: {e}"))
+    }
+
+    /// 加密:空串原样返回;输出 `enc:` + base64(12 字节 nonce ‖ 密文含 tag)。
+    pub fn encrypt(&self, plaintext: &str) -> Result<String, String> {
+        use aes_gcm::aead::Aead;
+        if plaintext.is_empty() {
+            return Ok(String::new());
+        }
+        let Some(_) = self.key else {
+            return Ok(plaintext.to_string());
+        };
+        let cipher = self.gcm()?;
+        let nonce_bytes = random_bytes(12)?;
+        let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher
+            .encrypt(nonce, plaintext.as_bytes())
+            .map_err(|e| format!("encrypt: {e}"))?;
+        let mut data = nonce.to_vec();
+        data.extend(ciphertext);
+        Ok(format!("{}{}", ENCRYPTED_PREFIX, to_base64(&data)))
+    }
+
+    /// 解密:空串或未带 `enc:` 前缀的输入原样返回(明文直通);
+    /// 带前缀但解不开则报错。
+    pub fn decrypt(&self, ciphertext: &str) -> Result<String, String> {
+        use aes_gcm::aead::Aead;
+        if ciphertext.is_empty() {
+            return Ok(String::new());
+        }
+        let Some(_) = self.key else {
+            return Ok(ciphertext.to_string());
+        };
+        let Some(encoded) = ciphertext.strip_prefix(ENCRYPTED_PREFIX) else {
+            return Ok(ciphertext.to_string());
+        };
+        let data = from_base64(encoded)
+            .map_err(|_| "invalid ciphertext: bad base64".to_string())?;
+        if data.len() < 12 {
+            return Err("invalid ciphertext: too short".to_string());
+        }
+        let (nonce, body) = data.split_at(12);
+        let cipher = self.gcm()?;
+        let plain = cipher
+            .decrypt(aes_gcm::Nonce::from_slice(nonce), body)
+            .map_err(|_| "decryption failed".to_string())?;
+        String::from_utf8(plain).map_err(|_| "decrypted bytes are not utf-8".to_string())
+    }
+
+    /// 便捷加密,失败即 panic(测试/脚本用)。
+    pub fn must_encrypt(&self, plaintext: &str) -> String {
+        self.encrypt(plaintext).expect("must_encrypt")
+    }
+
+    /// 便捷解密,失败即 panic(测试/脚本用)。
+    pub fn must_decrypt(&self, ciphertext: &str) -> String {
+        self.decrypt(ciphertext).expect("must_decrypt")
+    }
+}
+
+/// 判断字符串是否为 [`Encryptor`] 密文(带 `enc:` 前缀)。
+pub fn is_encrypted(data: &str) -> bool {
+    data.starts_with(ENCRYPTED_PREFIX)
+}
+
+static GLOBAL_ENCRYPTOR: std::sync::OnceLock<Encryptor> = std::sync::OnceLock::new();
+static NOOP_ENCRYPTOR: Encryptor = Encryptor { key: None };
+
+/// 初始化全局加密器。进程内首次调用生效,后续调用为 no-op
+/// (对齐上游 `sync.Once` 语义);`enabled=false` 时安装直通加密器。
+pub fn init_global_encryptor(key: &str, enabled: bool) -> Result<(), String> {
+    if GLOBAL_ENCRYPTOR.get().is_some() {
+        return Ok(());
+    }
+    let encryptor = if enabled {
+        Encryptor::new(key)?
+    } else {
+        Encryptor::disabled()
+    };
+    let _ = GLOBAL_ENCRYPTOR.set(encryptor);
+    Ok(())
+}
+
+/// 取全局加密器;未初始化时返回直通实例。
+pub fn get_global_encryptor() -> &'static Encryptor {
+    GLOBAL_ENCRYPTOR.get().unwrap_or(&NOOP_ENCRYPTOR)
+}
+
+/// 未启用加密时原样返回,否则加密。
+pub fn encrypt_if_needed(plaintext: &str) -> Result<String, String> {
+    get_global_encryptor().encrypt(plaintext)
+}
+
+/// 未启用加密时原样返回,否则解密(明文无前缀同样原样返回)。
+pub fn decrypt_if_needed(ciphertext: &str) -> Result<String, String> {
+    get_global_encryptor().decrypt(ciphertext)
+}
+
+/// 用全局加密器密钥对 data 计算 HMAC-SHA256 签名(hex 编码)。
+/// 全局加密器未配置(直通)时返回错误——签名能力不可用,调用方应拒绝
+/// 生成签名 URL 而非降级为无签名。
+pub fn sign_data(data: &str) -> Result<String, String> {
+    let key = get_global_encryptor()
+        .key
+        .ok_or("global encryptor is not initialized: signing unavailable")?;
+    use hmac::Mac as _;
+    let mut mac = <hmac::Hmac<Sha256> as hmac::Mac>::new_from_slice(&key)
+        .expect("hmac accepts any key length");
+    mac.update(data.as_bytes());
+    Ok(to_hex(&mac.finalize().into_bytes()))
+}
+
+/// 校验 [`sign_data`] 生成的签名(密钥缺失时恒 false;字节级常量时间比较)。
+pub fn verify_data(data: &str, signature: &str) -> bool {
+    use hmac::Mac as _;
+    let Some(key) = get_global_encryptor().key else {
+        return false;
+    };
+    let Ok(sig) = from_hex(signature) else {
+        return false;
+    };
+    let mut mac = <hmac::Hmac<Sha256> as hmac::Mac>::new_from_slice(&key)
+        .expect("hmac accepts any key length");
+    mac.update(data.as_bytes());
+    mac.verify_slice(&sig).is_ok()
+}
+
+/// 整包加密:payload 序列化为 JSON 后经 [`encrypt_if_needed`] 加密,
+/// 返回 `{_encrypted_config: 密文, _is_encrypted: 是否真加密}`,
+/// `reserved_keys` 声明的键以明文复制到外层供路由/调度层免解密读取。
+///
+/// 安全契约:仅当真完成加密时才置 `_is_encrypted = true`;全局加密器
+/// 未配置时保持明文且不标记,避免解密侧误判。
+pub fn encrypt_payload(
+    payload: serde_json::Map<String, serde_json::Value>,
+    reserved_keys: &[&str],
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let plain = serde_json::to_string(&payload).map_err(|e| format!("marshal payload: {e}"))?;
+    let encrypted = encrypt_if_needed(&plain).map_err(|e| format!("encrypt payload: {e}"))?;
+
+    let mut result = serde_json::Map::new();
+    result.insert(
+        ENCRYPTED_CONFIG_KEY.to_string(),
+        serde_json::Value::String(encrypted.clone()),
+    );
+    result.insert(
+        IS_ENCRYPTED_KEY.to_string(),
+        serde_json::Value::Bool(encrypted != plain),
+    );
+    for key in reserved_keys {
+        if let Some(v) = payload.get(*key) {
+            result.insert((*key).to_string(), v.clone());
+        }
+    }
+    Ok(result)
+}
+
+/// 整包解密:检测 `_is_encrypted` 标记,未加密原样返回(向后兼容明文)。
+pub fn decrypt_payload(
+    payload: serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let is_encrypted = matches!(
+        payload.get(IS_ENCRYPTED_KEY),
+        Some(serde_json::Value::Bool(true))
+    );
+    if !is_encrypted {
+        return Ok(payload);
+    }
+    let encrypted = match payload.get(ENCRYPTED_CONFIG_KEY) {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        _ => return Err("encrypted config not found or invalid type".to_string()),
+    };
+    let decrypted =
+        decrypt_if_needed(&encrypted).map_err(|e| format!("decrypt payload: {e}"))?;
+    serde_json::from_str(&decrypted).map_err(|e| format!("unmarshal decrypted payload: {e}"))
+}
+
+/// payload 是否含已加密配置。
+pub fn has_encrypted_payload(payload: &serde_json::Map<String, serde_json::Value>) -> bool {
+    matches!(
+        payload.get(IS_ENCRYPTED_KEY),
+        Some(serde_json::Value::Bool(true))
+    )
+}
+
+/// [`encrypt_payload`] 的 panic 变体(测试用)。
+pub fn must_encrypt_payload(
+    payload: serde_json::Map<String, serde_json::Value>,
+    reserved_keys: &[&str],
+) -> serde_json::Map<String, serde_json::Value> {
+    encrypt_payload(payload, reserved_keys).expect("must_encrypt_payload")
+}
+
+/// [`decrypt_payload`] 的 panic 变体(测试用)。
+pub fn must_decrypt_payload(
+    payload: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    decrypt_payload(payload).expect("must_decrypt_payload")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_encryptor_round_trip() {
+        let enc = Encryptor::new("my-secret-key").unwrap();
+        assert!(Encryptor::new("").is_err());
+
+        let sealed = enc.encrypt("hello world").unwrap();
+        assert!(sealed.starts_with(ENCRYPTED_PREFIX));
+        assert!(is_encrypted(&sealed));
+        assert_eq!(enc.decrypt(&sealed).unwrap(), "hello world");
+        // 空串原样往返;明文无前缀解密直通
+        assert_eq!(enc.encrypt("").unwrap(), "");
+        assert_eq!(enc.decrypt("plain-text").unwrap(), "plain-text");
+        assert!(!is_encrypted("plain-text"));
+        // 带前缀但内容损坏 → 报错
+        assert!(enc.decrypt(&format!("{}{}", ENCRYPTED_PREFIX, "!!!")).is_err());
+        // 随机 nonce:同一明文两次密文不同
+        assert_ne!(enc.encrypt("x").unwrap(), enc.encrypt("x").unwrap());
+    }
+
+    #[test]
+    fn test_encryptor_disabled_passthrough() {
+        let enc = Encryptor::disabled();
+        assert_eq!(enc.encrypt("plain").unwrap(), "plain");
+        assert_eq!(enc.decrypt("plain").unwrap(), "plain");
+        assert_eq!(enc.must_encrypt("x"), "x");
+    }
+
+    #[test]
+    fn test_global_encryptor_and_payload() {
+        // 未初始化:直通,payload 不标记加密,签名不可用
+        assert_eq!(encrypt_if_needed("raw").unwrap(), "raw");
+        assert_eq!(decrypt_if_needed("raw").unwrap(), "raw");
+        assert!(sign_data("x").is_err());
+        assert!(!verify_data("x", "00"));
+
+        let payload = serde_json::Map::from_iter([
+            ("config".to_string(), serde_json::json!({"a": 1})),
+            ("task_id".to_string(), serde_json::json!("t-1")),
+        ]);
+        let sealed = encrypt_payload(payload.clone(), &["task_id"]).unwrap();
+        assert!(!has_encrypted_payload(&sealed));
+        assert_eq!(sealed.get("task_id"), payload.get("task_id"));
+        // 未加密:信封原样往返(不解包为原始 payload)
+        let sealed_clone = sealed.clone();
+        let back = decrypt_payload(sealed).unwrap();
+        assert_eq!(back, sealed_clone);
+
+        // 初始化后:真加密 + 标记 + 签名可用;重复初始化为 no-op(不覆盖已有实例)
+        init_global_encryptor("global-key", true).unwrap();
+        init_global_encryptor("other-key", true).unwrap();
+        let sealed = encrypt_payload(payload.clone(), &["task_id"]).unwrap();
+        assert!(has_encrypted_payload(&sealed));
+        let plain_json = serde_json::to_string(&payload).unwrap();
+        assert_ne!(sealed.get("_encrypted_config").unwrap(), &serde_json::json!(plain_json));
+        let back = decrypt_payload(sealed).unwrap();
+        assert_eq!(back, payload);
+
+        let sig = sign_data("signed-url").unwrap();
+        assert!(verify_data("signed-url", &sig));
+        assert!(!verify_data("tampered", &sig));
+        assert!(!verify_data("signed-url", "zz"));
+
+        // must 系列往返
+        let sealed2 = must_encrypt_payload(payload.clone(), &[]);
+        assert_eq!(must_decrypt_payload(sealed2), payload);
+    }
 
     #[test]
     fn test_pkcs5_padding() {
@@ -567,13 +894,29 @@ mod tests {
     #[test]
     fn test_ecdsa_sign_verify() {
         let cipher = EcdsaCipher::new().unwrap();
-        let sig = cipher.sign(b"signed message");
+        let sig = cipher.sign(b"signed message").unwrap();
         assert!(sig.contains('$'));
         assert!(cipher.verify(b"signed message", &sig).unwrap());
         assert!(!cipher.verify(b"tampered message", &sig).unwrap());
         assert!(cipher.verify(b"x", "bad-format").is_err());
         assert_eq!(cipher.public_key_bytes().len(), 65);
         assert_eq!(cipher.public_key_bytes()[0], 0x04);
+    }
+
+    #[test]
+    fn test_ecdsa_verify_only_from_public_key() {
+        let signer = EcdsaCipher::new().unwrap();
+        // 公钥构造的仅验签实例可验持私钥方的签名,自身不可签名
+        let verifier = EcdsaCipher::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
+        let sig = signer.sign(b"cross verify").unwrap();
+        assert!(verifier.verify(b"cross verify", &sig).unwrap());
+        assert!(!verifier.verify(b"other payload", &sig).unwrap());
+        assert!(verifier.sign(b"cross verify").is_err());
+        // 公钥往返:再次构造行为一致
+        let verifier2 = EcdsaCipher::from_public_key_bytes(&verifier.public_key_bytes()).unwrap();
+        assert!(verifier2.verify(b"cross verify", &sig).unwrap());
+        // 坏公钥拒绝
+        assert!(EcdsaCipher::from_public_key_bytes(&[0u8; 10]).is_err());
     }
 
     #[test]

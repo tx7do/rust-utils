@@ -36,7 +36,8 @@ password = [
     "dep:rsa",
     "dep:p256",
 ]
-# Cipher primitives: AES-CBC / AES-GCM / RSA-OAEP / ECDSA+ECDH P-256 / HMAC / SHA-2.
+# Cipher primitives: AES-CBC / AES-GCM / RSA-OAEP / ECDSA+ECDH P-256 / HMAC / SHA-2;
+# application-level Encryptor ("enc:" prefix) + payload envelope (serde_json).
 crypto = [
     "dep:aes",
     "dep:cbc",
@@ -46,6 +47,7 @@ crypto = [
     "dep:getrandom",
     "dep:rsa",
     "dep:p256",
+    "dep:serde_json",
 ]
 # JWT generate / parse / verify / refresh, built on jsonwebtoken.
 jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json", "dep:getrandom"]
@@ -75,6 +77,7 @@ translator = ["dep:ureq", "dep:md-5", "dep:sha1", "dep:hmac", "dep:sha2", "dep:s
 distlock = []
 # 分布式锁的 Redis 落地(兼容 bsm/redislock 线上协议)。
 distlock-redis = ["distlock", "dep:redis", "dep:getrandom"]
+
 # Everything above, minus the exotic bits.
 full = [
     "sm",

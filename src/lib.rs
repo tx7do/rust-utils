@@ -28,8 +28,8 @@
 //! | [`random`] | `rand` | 随机工具:加权/别名表/骰子/抖动/正态/手机号等 |
 //! | [`name_generator`] | `name-generator` | 随机昵称与中英日姓名(内嵌词库) |
 //! | [`slug`] | `slug` | URL slug(unicode 转写) |
-//! | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 |
-//! | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充 |
+//! | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 + 复杂度校验 |
+//! | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充、Encryptor/payload 信封 |
 //! | [`jwt`] | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
 //! | [`bank_card`] | `bank-card` | Luhn 校验 + BIN 查询(内嵌记录) |
 //! | [`captcha`] | `captcha`(Redis 落地用 `captcha-redis`) | 图形验证码:四类文本驱动 + 滑块/点选/旋转,自绘渲染 |
@@ -142,6 +142,8 @@ pub mod geoip;
 pub mod jwt;
 #[cfg(feature = "name-generator")]
 pub mod name_generator;
+#[cfg(feature = "password")]
+pub mod password;
 #[cfg(feature = "rand")]
 pub mod random;
 #[cfg(feature = "slug")]

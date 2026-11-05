@@ -188,9 +188,41 @@ pub fn flatten<T: Clone>(input: &[Vec<T>]) -> Vec<T> {
     out
 }
 
+/// 黑名单过滤:剔除 `data` 中命中 `blacklist` 的元素,保持原顺序。
+pub fn filter_blacklist<T: Eq + std::hash::Hash + Clone>(data: &[T], blacklist: &[T]) -> Vec<T> {
+    let bm: std::collections::HashSet<&T> = blacklist.iter().collect();
+    data.iter()
+        .filter(|x| !bm.contains(x))
+        .cloned()
+        .collect()
+}
+
+/// 把数字切片格式化为逗号分隔的十进制字符串。
+pub fn number_slice_to_string(numbers: &[u32]) -> String {
+    numbers
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_filter_blacklist_and_number_join() {
+        assert_eq!(
+            filter_blacklist(&["a", "b", "c", "b"], &["b", "d"]),
+            vec!["a", "c"]
+        );
+        let empty: Vec<&str> = Vec::new();
+        assert_eq!(filter_blacklist::<&str>(&[], &["x"]), empty);
+        assert_eq!(filter_blacklist(&["a", "b"], &[] as &[&str]), vec!["a", "b"]);
+        assert_eq!(number_slice_to_string(&[1, 20, 300]), "1,20,300");
+        assert_eq!(number_slice_to_string(&[]), "");
+        assert_eq!(number_slice_to_string(&[7]), "7");
+    }
 
     #[test]
     fn test_find_family() {

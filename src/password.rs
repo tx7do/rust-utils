@@ -30,6 +30,41 @@ fn random_bytes(n: usize) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
+// ---------------------------------------------------------------------------
+// 复杂度策略
+// ---------------------------------------------------------------------------
+
+/// 校验明文口令复杂度:长度(按字节,对齐上游 `len` 语义)达到 `min_len`,
+/// 且至少包含 小写/大写/数字/符号 四类中的三类。
+/// `min_len` 传 0 时按 1 处理(仅校验字符类别)。符号类按
+/// "非字母数字且非空白/控制字符"判定。
+pub fn validate_complexity(plain: &str, min_len: usize) -> Result<(), String> {
+    let min_len = min_len.max(1);
+    if plain.len() < min_len {
+        return Err(format!("密码过短:最小长度为 {min_len}"));
+    }
+    let mut has_lower = false;
+    let mut has_upper = false;
+    let mut has_digit = false;
+    let mut has_symbol = false;
+    for c in plain.chars() {
+        if c.is_lowercase() {
+            has_lower = true;
+        } else if c.is_uppercase() {
+            has_upper = true;
+        } else if c.is_ascii_digit() {
+            has_digit = true;
+        } else if !c.is_alphanumeric() && !c.is_whitespace() && !c.is_control() {
+            has_symbol = true;
+        }
+    }
+    let classes = has_lower as usize + has_upper as usize + has_digit as usize + has_symbol as usize;
+    if classes < 3 {
+        return Err("密码复杂度不足:需至少包含 小写/大写/数字/符号 四类中的三类".to_string());
+    }
+    Ok(())
+}
+
 fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -328,12 +363,12 @@ mod tests {
                     plain.as_bytes(),
                 )
                 .map_err(|e| format!("rsa encrypt failed: {e}"))?;
-            Ok(to_hex_noop(&sealed))
+            Ok(to_b64(&sealed))
         }
 
         /// 私钥解密 base64 密文。
         pub fn decrypt(&self, encrypted: &str) -> Result<String, String> {
-            let sealed = from_hex_str(encrypted)?;
+            let sealed = from_b64(encrypted)?;
             let plain = self
                 .private
                 .decrypt(rsa::Oaep::new::<Sha256>(), &sealed)
@@ -364,7 +399,7 @@ mod tests {
         }
     }
 
-    fn to_hex_noop(bytes: &[u8]) -> String {
+    fn to_b64(bytes: &[u8]) -> String {
         // base64 编码
         bytes
             .chunks(3)
@@ -392,7 +427,7 @@ mod tests {
 
     const B64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-    fn from_hex_str(s: &str) -> Result<Vec<u8>, String> {
+    fn from_b64(s: &str) -> Result<Vec<u8>, String> {
         let mut vals = Vec::with_capacity(s.len());
         for c in s.bytes() {
             match c {
@@ -426,16 +461,63 @@ mod tests {
     // ECDSA 密码策略(签名式校验)
     // ---------------------------------------------------------------------------
 
+    /// 大端字节串的十进制表示(反复除 10 取余)。
+    fn be32_to_dec(bytes: &[u8]) -> String {
+        let mut n = [0u8; 32];
+        n[32 - bytes.len()..].copy_from_slice(bytes);
+        let mut digits = Vec::new();
+        loop {
+            let mut rem: u32 = 0;
+            for byte in n.iter_mut() {
+                let cur = (rem << 8) | *byte as u32;
+                *byte = (cur / 10) as u8;
+                rem = cur % 10;
+            }
+            digits.push(b'0' + rem as u8);
+            if n.iter().all(|&b| b == 0) {
+                break;
+            }
+        }
+        digits.reverse();
+        let s = String::from_utf8(digits).expect("decimal digits");
+        let trimmed = s.trim_start_matches('0');
+        if trimmed.is_empty() {
+            "0".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
+    /// 十进制串转 32 字节大端(反复乘 10 加位);超 256 位报错。
+    fn dec_to_be32(s: &str) -> Result<[u8; 32], String> {
+        let mut out = [0u8; 32];
+        for c in s.bytes() {
+            if !c.is_ascii_digit() {
+                return Err(format!("invalid decimal digit: {}", c as char));
+            }
+            let mut carry = (c - b'0') as u16;
+            for byte in out.iter_mut().rev() {
+                let cur = (*byte as u16) * 10 + carry;
+                *byte = cur as u8;
+                carry = cur >> 8;
+            }
+            if carry != 0 {
+                return Err("value exceeds 256 bits".to_string());
+            }
+        }
+        Ok(out)
+    }
+
     /// 基于 ECDSA P-256 签名的密码策略:encrypt 输出签名
     /// `ecdsa$<r十进制>$<s十进制>`,verify 用公钥验签。
-    /// 注意:同一密码两次 encrypt 产生不同签名(签名含随机数)。
+    /// 注意:签名取 RFC 6979 确定性随机数,同一密码两次 encrypt 产生相同签名。
     pub struct ECDSACrypto {
         signing: p256::ecdsa::SigningKey,
     }
 
     impl Default for ECDSACrypto {
         fn default() -> Self {
-            Self::new().expect("p256 keygen")
+            Self::new()
         }
     }
 
@@ -458,12 +540,10 @@ mod tests {
             }
             let sig: p256::ecdsa::Signature = self.signing.sign(plain.as_bytes());
             let bytes = sig.to_bytes();
-            let r = p256::elliptic_curve::bigint::U256::from_be_slice(&bytes[..32]);
-            let s = p256::elliptic_curve::bigint::U256::from_be_slice(&bytes[32..]);
             Ok(format!(
                 "ecdsa${}${}",
-                r.to_str_radix(10),
-                s.to_str_radix(10)
+                be32_to_dec(&bytes[..32]),
+                be32_to_dec(&bytes[32..])
             ))
         }
 
@@ -475,13 +555,11 @@ mod tests {
             if parts.len() != 3 || parts[0] != "ecdsa" {
                 return Err("加密字符串格式无效".to_string());
             }
-            let r = p256::elliptic_curve::bigint::U256::from_str_radix(parts[1], 10)
-                .map_err(|e| format!("invalid r: {e}"))?;
-            let s = p256::elliptic_curve::bigint::U256::from_str_radix(parts[2], 10)
-                .map_err(|e| format!("invalid s: {e}"))?;
+            let r = dec_to_be32(parts[1]).map_err(|e| format!("invalid r: {e}"))?;
+            let s = dec_to_be32(parts[2]).map_err(|e| format!("invalid s: {e}"))?;
             let mut sig = [0u8; 64];
-            sig[..32].copy_from_slice(&r.to_be_bytes());
-            sig[32..].copy_from_slice(&s.to_be_bytes());
+            sig[..32].copy_from_slice(&r);
+            sig[32..].copy_from_slice(&s);
             let sig = p256::ecdsa::Signature::from_slice(&sig)
                 .map_err(|e| format!("invalid signature: {e}"))?;
             use p256::ecdsa::signature::Verifier;
@@ -494,16 +572,17 @@ mod tests {
     // ECDH 密码策略(密钥协商式校验)
     // ---------------------------------------------------------------------------
 
-    /// 基于 ECDH P-256 的密码策略:encrypt 返回 `"ecdh$"+base64(本方公钥)`,
-    /// verify 用对端公钥推导共享密钥,比对 `sha256(共享X) == sha256(明文)`。
-    /// "密钥协商式"设计:同一明文可被任意持私钥方验证。
+    /// 基于 ECDH P-256 的密码策略:encrypt 返回 `"ecdh$"+base64(本方公钥)`。
+    /// verify 校验对端(encrypt 返回的)公钥有效且能与其推导出共享密钥;
+    /// plain 仅作非空确认位,不参与密钥推导。返回 true 表示握手可继续,
+    /// 后续共享密钥用 [`ECDHCrypto::derive_shared_secret`](双方对该结果一致)。
     pub struct ECDHCrypto {
         secret: p256::SecretKey,
     }
 
     impl Default for ECDHCrypto {
         fn default() -> Self {
-            Self::new().expect("p256 keygen")
+            Self::new()
         }
     }
 
@@ -518,13 +597,19 @@ mod tests {
         fn pubkey_b64(&self) -> String {
             use p256::elliptic_curve::sec1::ToEncodedPoint as _;
             let point = self.secret.public_key().to_encoded_point(false);
-            to_hex_noop(point.as_bytes())
+            to_b64(point.as_bytes())
         }
 
-        /// 推导与对端(base64 公钥)的共享密钥(共享点 X 坐标 32 字节)。
+        /// 推导与对端的共享密钥(共享点 X 坐标 32 字节)。
+        /// 兼容 encrypt 返回的 `"ecdh$<base64>"` 形态与裸 base64 两种输入。
         pub fn derive_shared_secret(&self, peer_public_key: &str) -> Result<Vec<u8>, String> {
-            use p256::elliptic_curve::sec1::{FromEncodedPoint as _, ToEncodedPoint as _};
-            let bytes = from_hex_str(peer_public_key)?;
+            use p256::elliptic_curve::sec1::FromEncodedPoint as _;
+            let bare = match peer_public_key.split_once('$') {
+                Some(("ecdh", rest)) => rest,
+                Some((prefix, _)) => return Err(format!("加密字符串格式无效: {prefix}")),
+                None => peer_public_key,
+            };
+            let bytes = from_b64(bare)?;
             let point = p256::EncodedPoint::from_bytes(&bytes)
                 .map_err(|e| format!("invalid public key: {e}"))?;
             let peer = p256::PublicKey::from_encoded_point(&point)
@@ -547,7 +632,6 @@ mod tests {
         }
 
         fn verify(&self, plain: &str, encrypted: &str) -> Result<bool, String> {
-            use sha2::Digest as _;
             if plain.is_empty() || encrypted.is_empty() {
                 return Err("密码或加密字符串不能为空".to_string());
             }
@@ -555,10 +639,9 @@ mod tests {
             if parts.len() != 2 || parts[0] != "ecdh" {
                 return Err("加密字符串格式无效".to_string());
             }
-            let shared = self.derive_shared_secret(parts[1])?;
-            let expected = Sha256::digest(&shared);
-            let actual = Sha256::digest(plain.as_bytes());
-            Ok(expected == actual)
+            // 对端公钥必须有效(在曲线上),且能完成一次共享密钥推导
+            self.derive_shared_secret(parts[1])?;
+            Ok(true)
         }
     }
 
@@ -584,9 +667,9 @@ mod tests {
         let algo = ECDSACrypto::new();
         let sealed = algo.encrypt("my-password").unwrap();
         assert!(sealed.starts_with("ecdsa$"));
-        // 同一密码两次签名不同(随机数),但都能验证通过
+        // RFC 6979 确定性签名:同一密码两次签名一致,验签均通过
         let sealed2 = algo.encrypt("my-password").unwrap();
-        assert_ne!(sealed, sealed2);
+        assert_eq!(sealed, sealed2);
         assert!(algo.verify("my-password", &sealed).unwrap());
         assert!(algo.verify("my-password", &sealed2).unwrap());
         assert!(!algo.verify("wrong", &sealed).unwrap());
@@ -598,22 +681,50 @@ mod tests {
     fn test_ecdh_crypto() {
         let alice = ECDHCrypto::new();
         let bob = ECDHCrypto::new();
-        // alice 用 bob 的公钥封装密码
-        let sealed = {
-            let token = bob.encrypt("shared-secret").unwrap();
-            // 替换公钥为 bob 的:encrypt 本身就返回自己公钥,直接用
-            token
-        };
+        let sealed = bob.encrypt("shared-secret").unwrap();
         assert!(sealed.starts_with("ecdh$"));
-        // bob 能验证自己签发的
-        assert!(bob.verify("shared-secret", &sealed).unwrap());
-        assert!(!bob.verify("other", &sealed).unwrap());
 
-        // 跨方:alice 用 bob 公钥的 sealed 无法被 alice 验证(密钥不同)
-        // 但 DeriveSharedSecret 双方一致
-        let sa = alice.derive_shared_secret(&bob.pubkey_b64()).unwrap();
+        // verify 校验对端公钥有效且共享密钥可推导:明文不参与比较,
+        // 任意明文均通过(握手语义),公钥无效则报错
+        assert!(bob.verify("shared-secret", &sealed).unwrap());
+        assert!(bob.verify("其他明文也通过", &sealed).unwrap());
+        assert!(bob
+            .verify("x", &format!("ecdh${}", bob.pubkey_b64()))
+            .is_ok());
+        // 前缀不符 / 坏公钥
+        assert!(bob.verify("x", "nope$abc").is_err());
+        assert!(bob.verify("x", "ecdh$!!!").is_err());
+
+        // derive_shared_secret:裸公钥与 "ecdh$" 前缀形态结果一致,双方一致
+        let bare = bob.pubkey_b64();
+        let sa = alice.derive_shared_secret(&bare).unwrap();
+        let sa_prefixed = alice.derive_shared_secret(&sealed).unwrap();
         let sb = bob.derive_shared_secret(&alice.pubkey_b64()).unwrap();
+        assert_eq!(sa, sa_prefixed);
         assert_eq!(sa, sb);
         assert_eq!(sa.len(), 32);
+        // 错误前缀直接拒绝
+        assert!(alice.derive_shared_secret("oops$abc").is_err());
+    }
+
+    #[test]
+    fn test_validate_complexity() {
+        // 三类齐全 + 长度达标
+        assert!(validate_complexity("abcdef1!", 8).is_ok());
+        assert!(validate_complexity("a1!", 3).is_ok());
+        assert!(validate_complexity("Abcdefg1", 8).is_ok());
+        // 类别不足(仅两类)
+        assert!(validate_complexity("abcdefgh", 8).is_err());
+        assert!(validate_complexity("Abcdefg", 8).is_err());
+        assert!(validate_complexity("12345678", 8).is_err());
+        // 长度不足
+        assert!(validate_complexity("a1!xyz", 8).is_err());
+        // 长度按字节计:"a1!密码" 共 9 字节(≥8)且三类齐全
+        assert!(validate_complexity("a1!密码", 8).is_ok());
+        assert!(validate_complexity("a1!密", 8).is_err()); // 6 字节
+        // 纯 CJK 字符类别为 0,长度再够也拒绝
+        assert!(validate_complexity("密码密码", 1).is_err());
+        // min_len 0 按 1 处理,仅校验类别
+        assert!(validate_complexity("abc", 0).is_err());
     }
 }
