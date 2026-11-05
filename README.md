@@ -35,14 +35,19 @@ rust-utils = "0.1"
 | [`stringcase`] | 默认 | 驼峰/蛇形/烤肉串转换,识别缩写词与数字段 |
 | [`stringutil`] | 默认 | 宽松数值/布尔解析、JSON 字段值重写 |
 | [`sliceutil`] | 默认 | 查找族、交集/差集/并集、去重、分块 |
+| [`sqlutil`] | 默认 | PostgreSQL 词法级 SQL 脱敏(MaskSQL)与表提取(ExtractTables) |
 | [`maputil`] | 默认 | keys/values/merge/drop/filter |
 | [`mathutil`] | 默认 | 统计量、手写正态分布(Gaussian)、Erfc/Ierfc |
+| [`netutil`] | 默认 | SSRF 防护(URL 校验 + 黑名单网段 + DNS 解析检查)、可信代理链客户端 IP |
 | [`pagination`] | 默认 | 分页偏移量 |
 | [`cryptocurrency`] | 默认 | 加密货币钱包地址格式校验 |
 | [`query_parser`] | `json`(JSON 形式需要) | Django 风格 `field__op` 过滤/排序解析 |
 | [`ddl_parser`] | 默认 | MySQL `CREATE TABLE` 解析(手写词法,零依赖) |
 | [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
+| [`eventbus`] | 默认 | 进程内事件总线:订阅/发布 + 中间件链 + 多总线管理器 |
 | [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
+| [`converter`] | 默认 | REST 路径 / operationID → `resource:action` 权限码 |
+| [`authorizer`] | 默认 | 授权管理器壳:Engine 抽象 + noop/deny-all(fail-closed) |
 | [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
 | [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
 | [`dateutil`] | `chrono` | 日粒度取整、区间判断 |
@@ -50,8 +55,14 @@ rust-utils = "0.1"
 | [`random`] | `rand` | 随机工具:加权/别名表/骰子/抖动/正态/手机号等 |
 | [`name_generator`] | `name-generator` | 随机昵称与中英日姓名(内嵌 2.5 MB 词库) |
 | [`slug`] | `slug` | URL slug(unicode 转写) |
-| [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 |
-| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充 |
+| [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 + 复杂度校验 |
+| [`ossutil`] | `ossutil` | 对象存储辅助:MIME/魔数→桶与扩展名、文件名策略、上传守卫 |
+| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充、Encryptor(`enc:` 前缀)/payload 信封/数据签名 |
+| [`auditutil`] | `auditutil` | 审计日志:客户端 IP + 篡改证据链(确定性哈希 + ECDSA-P256 签名) |
+| [`doctext`] | `doctext`(PDF 用 `doctext-pdf`) | txt/md/csv/html/docx/pdf 纯文本提取 |
+| [`fieldperm`] | `fieldperm` | 字段级读写裁剪(路径语义对齐 protoreflect 行为) |
+| [`mailer`] | `mailer` | SMTP 邮件:STARTTLS / 隐式 SSL,发件人显示名 |
+| [`notify`] | `notify` | 多渠道通知:webhook/IM/邮件/SMS/vendor push,SSRF 防线出站 |
 | [`jwt`] | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
 | [`bank_card`] | `bank-card` | Luhn 校验 + BIN 查询(内嵌 2013 条记录) |
 | [`captcha`] | `captcha` | 图形验证码:数字/字母/算术/中文四类文本驱动 + 滑块/点选/旋转,自绘渲染,输出 JSON 与 base64Captcha 前端组件兼容,存储层可插拔(`captcha-redis` 提供 Redis 落地) |
@@ -84,6 +95,17 @@ rust-utils = "0.1"
 [`slug`]: src/slug.rs
 [`password`]: src/password.rs
 [`crypto`]: src/crypto.rs
+[`converter`]: src/converter.rs
+[`eventbus`]: src/eventbus.rs
+[`netutil`]: src/netutil.rs
+[`sqlutil`]: src/sqlutil.rs
+[`authorizer`]: src/authorizer.rs
+[`ossutil`]: src/ossutil.rs
+[`auditutil`]: src/auditutil.rs
+[`doctext`]: src/doctext.rs
+[`fieldperm`]: src/fieldperm.rs
+[`mailer`]: src/mailer.rs
+[`notify`]: src/notify.rs
 [`jwt`]: src/jwt.rs
 [`bank_card`]: src/bank_card.rs
 [`captcha`]: src/captcha.rs

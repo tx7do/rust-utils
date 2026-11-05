@@ -35,14 +35,19 @@ rust-utils = "0.1"
 | [`stringcase`] | default | camel/snake/kebab conversion, acronym- and digit-segment aware |
 | [`stringutil`] | default | Lenient numeric/boolean parsing, JSON field-value rewriting |
 | [`sliceutil`] | default | Find family, intersection/difference/union, dedup, chunking |
+| [`sqlutil`] | 默认 | Lexical SQL masking (MaskSQL) and table extraction (ExtractTables) for PostgreSQL-flavored SQL |
 | [`maputil`] | default | keys/values/merge/drop/filter |
 | [`mathutil`] | default | Statistics, hand-written Gaussian, Erfc/Ierfc |
+| [`netutil`] | 默认 | SSRF protection (URL validation + blocked CIDRs + DNS resolve check), spoof-proof client IP via trusted proxy chain |
 | [`pagination`] | default | Pagination offsets |
 | [`cryptocurrency`] | default | Crypto wallet address format validation |
 | [`query_parser`] | `json` (for the JSON form) | Django-style `field__op` filter/sort parsing |
 | [`ddl_parser`] | default | MySQL `CREATE TABLE` parsing (hand-written lexer, zero deps) |
 | [`eventloop`] | default | Single-threaded priority event loop, with a frame-driven mode |
+| [`eventbus`] | 默认 | In-process event bus: subscribe/publish + middleware chain + multi-bus manager |
 | [`aggregator`] | default | Relation backfill (lists/trees) + parallel executor + cached batch loader |
+| [`converter`] | 默认 | REST path / operationID → `resource:action` permission code |
+| [`authorizer`] | 默认 | Authorization manager shell: Engine abstraction + noop/deny-all (fail-closed) |
 | [`id`] | default (`uuid` optional) | Snowflake IDs, order IDs, machine codes (built-in SHA-256), UUID v4/v7 |
 | [`fsutil`] | default (`glob` optional) | File/path helpers |
 | [`dateutil`] | `chrono` | Day-granularity truncation, range checks |
@@ -50,8 +55,14 @@ rust-utils = "0.1"
 | [`random`] | `rand` | Random toolkit: weighted choice/alias table/dice/jitter/gaussian/phone numbers, etc. |
 | [`name_generator`] | `name-generator` | Random nicknames and Chinese/English/Japanese names (embedded 2.5 MB dictionaries) |
 | [`slug`] | `slug` | URL slugs (unicode transliteration) |
-| [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA hashing strategies |
-| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2, PKCS#7 padding |
+| [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA hashing strategies + complexity validation |
+| [`ossutil`] | `ossutil` | Object-storage helpers: MIME/magic-byte → bucket & extension mapping, filename strategies, upload guards |
+| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2, PKCS#7 padding, Encryptor (`enc:` prefix) / payload envelope / data signing |
+| [`auditutil`] | `auditutil` | Audit log: client IP + tamper-evidence chain (deterministic hashing + ECDSA-P256 signing) |
+| [`doctext`] | `doctext` (PDF via `doctext-pdf`) | Plain-text extraction from txt/md/csv/html/docx/pdf |
+| [`fieldperm`] | `fieldperm` | Field-level read/write trimming (path semantics aligned with the protoreflect behavior) |
+| [`mailer`] | `mailer` | SMTP mail: STARTTLS / implicit SSL, sender display name |
+| [`notify`] | `notify` | Multi-channel notification: webhook/IM/email/SMS/vendor push, SSRF-guarded outbound |
 | [`jwt`] | `jwt` | JWT generate/parse/verify/refresh (HS256) |
 | [`bank_card`] | `bank-card` | Luhn validation + BIN lookup (2,013 embedded records) |
 | [`captcha`] | `captcha` | Image CAPTCHA: digit/alphanumeric/arithmetic/Chinese text drivers + slide/click/rotate, self-drawn rendering, JSON output compatible with the base64Captcha front-end component, pluggable storage (`captcha-redis` adds a Redis store) |
@@ -84,6 +95,17 @@ rust-utils = "0.1"
 [`slug`]: src/slug.rs
 [`password`]: src/password.rs
 [`crypto`]: src/crypto.rs
+[`converter`]: src/converter.rs
+[`eventbus`]: src/eventbus.rs
+[`netutil`]: src/netutil.rs
+[`sqlutil`]: src/sqlutil.rs
+[`authorizer`]: src/authorizer.rs
+[`ossutil`]: src/ossutil.rs
+[`auditutil`]: src/auditutil.rs
+[`doctext`]: src/doctext.rs
+[`fieldperm`]: src/fieldperm.rs
+[`mailer`]: src/mailer.rs
+[`notify`]: src/notify.rs
 [`jwt`]: src/jwt.rs
 [`bank_card`]: src/bank_card.rs
 [`captcha`]: src/captcha.rs

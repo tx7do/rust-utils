@@ -35,14 +35,19 @@ rust-utils = "0.1"
 | [`stringcase`] | デフォルト | キャメル/スネーク/ケバブ変換、略語と数字セグメントを認識 |
 | [`stringutil`] | デフォルト | 寛容な数値/ブール解析、JSON フィールド値の書き換え |
 | [`sliceutil`] | デフォルト | 検索系、積/差/和集合、重複排除、チャンク分割 |
+| [`sqlutil`] | 默认 | PostgreSQL 方言の字句レベル SQL マスキング(MaskSQL)とテーブル抽出(ExtractTables) |
 | [`maputil`] | デフォルト | keys/values/merge/drop/filter |
 | [`mathutil`] | デフォルト | 統計量、手書き正規分布(Gaussian)、Erfc/Ierfc |
+| [`netutil`] | 默认 | SSRF 防護(URL 検証 + 拒否 CIDR + DNS 解決チェック)、信頼プロキシチェーンによるクライアント IP |
 | [`pagination`] | デフォルト | ページング オフセット |
 | [`cryptocurrency`] | デフォルト | 暗号資産ウォレットアドレスの形式検証 |
 | [`query_parser`] | `json`(JSON 形式に必要) | Django 風 `field__op` フィルタ/ソート解析 |
 | [`ddl_parser`] | デフォルト | MySQL `CREATE TABLE` 解析(手書きレキサ、ゼロ依存) |
 | [`eventloop`] | デフォルト | シングルスレッド優先度付きイベントループ、フレーム駆動モード対応 |
+| [`eventbus`] | 默认 | プロセス内イベントバス:購読/発行 + ミドルウェアチェーン + マルチバスマネージャー |
 | [`aggregator`] | デフォルト | 関連データ紐付け(リスト/ツリー)+ 並列エグゼキュータ + キャッシュ式バッチローダ |
+| [`converter`] | 默认 | REST パス / operationID → `resource:action` 権限コード |
+| [`authorizer`] | 默认 | 認可マネージャー骨格:Engine 抽象 + noop/deny-all(fail-closed) |
 | [`id`] | デフォルト(`uuid` 任意) | Snowflake ID、注文番号、マシンコード(内蔵 SHA-256)、UUID v4/v7 |
 | [`fsutil`] | デフォルト(`glob` 任意) | ファイル/パス補助 |
 | [`dateutil`] | `chrono` | 日粒度の丸め、期間判定 |
@@ -50,8 +55,14 @@ rust-utils = "0.1"
 | [`random`] | `rand` | 乱数ツール:重み付き選択/エイリアステーブル/サイコロ/ジッタ/正規分布/電話番号など |
 | [`name_generator`] | `name-generator` | ランダムニックネームと中英日の氏名(内蔵 2.5 MB 辞書) |
 | [`slug`] | `slug` | URL slug(Unicode 音訳) |
-| [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA ハッシュ戦略 |
-| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 パディング |
+| [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA ハッシュ戦略 + 複雑度検証 |
+| [`ossutil`] | `ossutil` | オブジェクトストレージ補助:MIME/マジックバイト→バケット・拡張子マッピング、ファイル名戦略、アップロードガード |
+| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 パディング、Encryptor(`enc:` プレフィックス)/payload エンベロープ/データ署名 |
+| [`auditutil`] | `auditutil` | 監査ログ:クライアント IP + 改ざん検知チェーン(決定論的ハッシュ + ECDSA-P256 署名) |
+| [`doctext`] | `doctext`(PDF は `doctext-pdf`) | txt/md/csv/html/docx/pdf からのプレーンテキスト抽出 |
+| [`fieldperm`] | `fieldperm` | フィールド単位の読み書きトリミング(protoreflect の挙動に沿ったパス意味論) |
+| [`mailer`] | `mailer` | SMTP メール:STARTTLS / 暗黙 SSL、送信者表示名 |
+| [`notify`] | `notify` | マルチチャネル通知:webhook/IM/メール/SMS/ベンダープッシュ、SSRF 防護付き送信 |
 | [`jwt`] | `jwt` | JWT 生成/パース/検証/リフレッシュ(HS256) |
 | [`bank_card`] | `bank-card` | Luhn 検証 + BIN 検索(内蔵 2,013 件) |
 | [`captcha`] | `captcha` | 画像 CAPTCHA:数字/英数字/算術/中国語の 4 テキストドライバ + スライド/クリック/回転、自前描画、base64Captcha フロントエンド コンポーネント互換の JSON 出力、ストレージ差し替え可(Redis は `captcha-redis`) |
@@ -84,6 +95,17 @@ rust-utils = "0.1"
 [`slug`]: src/slug.rs
 [`password`]: src/password.rs
 [`crypto`]: src/crypto.rs
+[`converter`]: src/converter.rs
+[`eventbus`]: src/eventbus.rs
+[`netutil`]: src/netutil.rs
+[`sqlutil`]: src/sqlutil.rs
+[`authorizer`]: src/authorizer.rs
+[`ossutil`]: src/ossutil.rs
+[`auditutil`]: src/auditutil.rs
+[`doctext`]: src/doctext.rs
+[`fieldperm`]: src/fieldperm.rs
+[`mailer`]: src/mailer.rs
+[`notify`]: src/notify.rs
 [`jwt`]: src/jwt.rs
 [`bank_card`]: src/bank_card.rs
 [`captcha`]: src/captcha.rs
