@@ -10,9 +10,9 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// 飞书开放平台域(国际版 Lark 用 [`Config::api_base`] 覆写为 <https://open.larksuite.com>)。
 pub const DEFAULT_API_BASE: &str = "https://open.feishu.cn";
@@ -121,7 +121,10 @@ impl Service {
             .to_string();
         let expire = answer.get("expire").and_then(Value::as_i64).unwrap_or(0);
         if code != 0 || token.is_empty() {
-            let msg = answer.get("msg").and_then(Value::as_str).unwrap_or("no message");
+            let msg = answer
+                .get("msg")
+                .and_then(Value::as_str)
+                .unwrap_or("no message");
             return Err(NotifyError::Delivery(format!(
                 "token endpoint answered code={code}: {msg}"
             )));
@@ -168,7 +171,10 @@ impl Service {
         })?;
         let code = answer.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 0 {
-            let msg = answer.get("msg").and_then(Value::as_str).unwrap_or("no message");
+            let msg = answer
+                .get("msg")
+                .and_then(Value::as_str)
+                .unwrap_or("no message");
             return Err(NotifyError::Delivery(format!(
                 "peer answered code={code}: {msg}"
             )));
@@ -211,7 +217,8 @@ impl Service {
         let mut st = self.lock_token();
         st.token = token.clone();
         st.expires_at = Some(
-            Instant::now() + Duration::from_secs(ttl.saturating_sub(TOKEN_REFRESH_MARGIN.as_secs())),
+            Instant::now()
+                + Duration::from_secs(ttl.saturating_sub(TOKEN_REFRESH_MARGIN.as_secs())),
         );
         Ok(token)
     }
@@ -386,7 +393,9 @@ mod tests {
             app_secret: "secret-1".into(),
             ..Config::default()
         });
-        assert!(req.url.ends_with("/open-apis/auth/v3/tenant_access_token/internal"));
+        assert!(req
+            .url
+            .ends_with("/open-apis/auth/v3/tenant_access_token/internal"));
         let payload: Value = serde_json::from_str(&req.body).unwrap();
         assert_eq!(payload["app_id"], "app-1");
         assert_eq!(payload["app_secret"], "secret-1");
@@ -424,20 +433,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            req.url,
-            "https://open.example.test/open-apis/im/v1/messages?receive_id_type=open_id",
+            req.url, "https://open.example.test/open-apis/im/v1/messages?receive_id_type=open_id",
             "接收人类型默认 open_id"
         );
-        assert_eq!(
-            req.headers[0],
-            ("Authorization", "Bearer t-1".to_string())
-        );
+        assert_eq!(req.headers[0], ("Authorization", "Bearer t-1".to_string()));
         let payload: Value = serde_json::from_str(&req.body).unwrap();
         assert_eq!(payload["receive_id"], "ou_user1");
         assert_eq!(payload["msg_type"], "text");
         // content 是"JSON 字符串套 JSON":内层先序列化成串再嵌进去。
-        let inner: Value =
-            serde_json::from_str(payload["content"].as_str().unwrap()).unwrap();
+        let inner: Value = serde_json::from_str(payload["content"].as_str().unwrap()).unwrap();
         assert_eq!(inner["text"], "审批提醒\n您有一张单据待审批");
     }
 
@@ -449,7 +453,10 @@ mod tests {
             r#"{"code":0,"msg":"success","data":{"message_id":"om_abc123"}}"#,
         )
         .unwrap();
-        assert_eq!(receipt.provider_id, "om_abc123", "飞书的 message_id 要进回执");
+        assert_eq!(
+            receipt.provider_id, "om_abc123",
+            "飞书的 message_id 要进回执"
+        );
 
         let err = Service::parse_push_answer(200, r#"{"code":230001,"msg":"invalid receive_id"}"#)
             .unwrap_err();

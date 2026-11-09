@@ -13,7 +13,8 @@ use std::io::Read;
 use serde_json::{json, Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// 应答读取上限。
@@ -93,7 +94,11 @@ impl Service {
         Ok(Outbound {
             method: "POST",
             // application token 走 query(Gotify 的惯例)。
-            url: format!("{}/message?token={}", self.cfg.server_url, query_escape(&self.cfg.app_token)),
+            url: format!(
+                "{}/message?token={}",
+                self.cfg.server_url,
+                query_escape(&self.cfg.app_token)
+            ),
             body: Value::Object(payload).to_string(),
             headers: vec![("Content-Type", "application/json".to_string())],
         })
@@ -130,7 +135,9 @@ impl NotifyService for Service {
     /// 发一条消息(Target 忽略——收件身份是 AppToken)。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("gotify message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "gotify message body is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -183,7 +190,9 @@ fn query_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => {
                 out.push('%');
@@ -217,9 +226,17 @@ mod tests {
 
     #[test]
     fn test_missing_config_is_not_configured() {
-        let svc = Service::new(true, Config { server_url: "https://example.com".into(), ..Config::default() });
+        let svc = Service::new(
+            true,
+            Config {
+                server_url: "https://example.com".into(),
+                ..Config::default()
+            },
+        );
         assert_eq!(svc.name(), "gotify");
-        let err = svc.build_request(&Message::new("", "t").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("", "t").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured(), "缺 app_token 在拨号之前就该拦下");
     }
 
@@ -238,8 +255,10 @@ mod tests {
         let out = svc.build_request(&msg).unwrap();
 
         assert_eq!(out.method, "POST");
-        assert_eq!(out.url, "https://gotify.example/message?token=Atoken",
-            "application token 走 query(Gotify 的惯例)");
+        assert_eq!(
+            out.url, "https://gotify.example/message?token=Atoken",
+            "application token 走 query(Gotify 的惯例)"
+        );
 
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["title"], "重置验证码");
@@ -252,20 +271,33 @@ mod tests {
         // 配置默认优先级生效。
         let svc = Service::new(
             true,
-            Config { server_url: "https://g.example".into(), app_token: "t".into(), priority: 7, ..Config::default() },
+            Config {
+                server_url: "https://g.example".into(),
+                app_token: "t".into(),
+                priority: 7,
+                ..Config::default()
+            },
         );
-        let out = svc.build_request(&Message::new("", "t").with_content("c")).unwrap();
+        let out = svc
+            .build_request(&Message::new("", "t").with_content("c"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["priority"], 7);
 
         // 0 不占字段(对端按默认档位处理)。
-        let out = service().build_request(&Message::new("", "t").with_content("c")).unwrap();
+        let out = service()
+            .build_request(&Message::new("", "t").with_content("c"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert!(payload.get("priority").is_none(), "priority=0 不占字段");
 
         // 垃圾优先级在拨号之前拦下。
         let err = service()
-            .build_request(&Message::new("", "t").with_content("c").with_param("priority", "high"))
+            .build_request(
+                &Message::new("", "t")
+                    .with_content("c")
+                    .with_param("priority", "high"),
+            )
             .unwrap_err();
         assert!(err.is_not_configured(), "优先级要数字档位");
     }
@@ -274,9 +306,15 @@ mod tests {
     fn test_send_blocked_target() {
         let svc = Service::new(
             false,
-            Config { server_url: "http://127.0.0.1:1".into(), app_token: "t".into(), ..Config::default() },
+            Config {
+                server_url: "http://127.0.0.1:1".into(),
+                app_token: "t".into(),
+                ..Config::default()
+            },
         );
-        let err = svc.send(&Message::new("", "t").with_content("c")).unwrap_err();
+        let err = svc
+            .send(&Message::new("", "t").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 

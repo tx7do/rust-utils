@@ -183,8 +183,20 @@ fn global_hmac_secret() -> Vec<u8> {
 fn is_tspecial(b: u8) -> bool {
     matches!(
         b,
-        b'(' | b')' | b'<' | b'>' | b'@' | b',' | b';' | b':' | b'\\' | b'"' | b'[' | b']' | b'?'
-            | b'=' | b'/'
+        b'(' | b')'
+            | b'<'
+            | b'>'
+            | b'@'
+            | b','
+            | b';'
+            | b':'
+            | b'\\'
+            | b'"'
+            | b'['
+            | b']'
+            | b'?'
+            | b'='
+            | b'/'
     )
 }
 
@@ -222,7 +234,10 @@ fn consume_value(v: &str) -> (String, String) {
         let r = bytes[i];
         if r == b'"' {
             // 结束引号;'"' 为 ASCII,切点必在字符边界上
-            return (String::from_utf8_lossy(&buf).into_owned(), v[i + 1..].to_string());
+            return (
+                String::from_utf8_lossy(&buf).into_owned(),
+                v[i + 1..].to_string(),
+            );
         }
         if r == b'\\' && i + 1 < bytes.len() && is_tspecial(bytes[i + 1]) {
             // 形如 "\"."" 的合法转义;MSIE 的裸反斜杠路径按 Go 同款规则处理
@@ -801,7 +816,9 @@ pub fn file_extension_to_bucket_name(ext: &str) -> String {
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "ico" | "svg" | "tif" | "tiff"
         | "heic" => BUCKET_IMAGES.to_string(),
         // videos
-        "mp4" | "webm" | "mov" | "mkv" | "avi" | "flv" | "mpeg" | "mpg" => BUCKET_VIDEOS.to_string(),
+        "mp4" | "webm" | "mov" | "mkv" | "avi" | "flv" | "mpeg" | "mpg" => {
+            BUCKET_VIDEOS.to_string()
+        }
         // audios
         "mp3" | "wav" | "ogg" | "m4a" | "flac" | "aac" => BUCKET_AUDIOS.to_string(),
         // text / docs
@@ -876,8 +893,12 @@ pub fn content_type_to_file_extension(content_type: &str) -> String {
         "text/x-python" | "application/x-python" | "text/python" => return "py".to_string(),
 
         // Shell scripts
-        "text/x-shellscript" | "application/x-sh" | "application/x-shellscript" | "text/x-sh"
-        | "text/x-bash" | "application/x-bash" => return "sh".to_string(),
+        "text/x-shellscript"
+        | "application/x-sh"
+        | "application/x-shellscript"
+        | "text/x-sh"
+        | "text/x-bash"
+        | "application/x-bash" => return "sh".to_string(),
 
         // application / documents / archives
         "application/pdf" => return "pdf".to_string(),
@@ -1082,7 +1103,11 @@ pub fn genera_content_sha265_file_name(file_content: &[u8], file_ext: &str) -> S
 /// - 优点:对同样内容一致(可去重),但没有 secret 时不可被离线匹配,抗探测。
 /// - 缺点:需要管理 secret(泄露则失效);计算开销中等(一次哈希 + HMAC)。
 /// - 适用:需要去重同时又要防止哈希被猜测/探测的场景。
-pub fn generate_hmac_content_file_name(secret: &[u8], file_content: &[u8], file_ext: &str) -> String {
+pub fn generate_hmac_content_file_name(
+    secret: &[u8],
+    file_content: &[u8],
+    file_ext: &str,
+) -> String {
     // 先计算内容 SHA256
     let sum = Sha256::digest(file_content);
 
@@ -1126,7 +1151,11 @@ pub fn genera_time_base_file_name(file_ext: &str) -> String {
 }
 
 /// 生成文件名,按策略分派(上游 `GenerateFileName`)。
-pub fn generate_file_name(file_content: &[u8], file_ext: &str, typ: GenerateFileNameType) -> String {
+pub fn generate_file_name(
+    file_content: &[u8],
+    file_ext: &str,
+    typ: GenerateFileNameType,
+) -> String {
     match typ {
         GenerateFileNameType::Uuid => {
             // 要最大唯一性、低延迟、高并发
@@ -1344,7 +1373,9 @@ mod tests {
 
     /// 判断字符串是否为小写十六进制(Go 测试中 `^[0-9a-f]+$` 正则的等价物)。
     fn is_lower_hex(s: &str) -> bool {
-        !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     }
 
     #[test]
@@ -1400,7 +1431,10 @@ mod tests {
         assert_eq!(content_type_to_file_extension("video/quicktime"), "mov");
         assert_eq!(content_type_to_file_extension("audio/mp4"), "m4a");
         assert_eq!(content_type_to_file_extension("image/tiff"), "tif"); // 内置表回落
-        assert_eq!(content_type_to_file_extension("application/unknown-type"), ""); // 查无映射
+        assert_eq!(
+            content_type_to_file_extension("application/unknown-type"),
+            ""
+        ); // 查无映射
     }
 
     #[test]
@@ -1470,26 +1504,17 @@ mod tests {
         // 空内容 → text/plain(内置表首个扩展为 .text)
         assert_eq!(
             detect_file_type(b""),
-            (
-                "text/plain; charset=utf-8".to_string(),
-                ".text".to_string()
-            )
+            ("text/plain; charset=utf-8".to_string(), ".text".to_string())
         );
         // 二进制控制字节 → octet-stream(内置表首个扩展为 .bin)
         assert_eq!(
             detect_file_type(&[0x00, 0x01, 0x02]),
-            (
-                "application/octet-stream".to_string(),
-                ".bin".to_string()
-            )
+            ("application/octet-stream".to_string(), ".bin".to_string())
         );
         // HTML 签名(大小写不敏感 + 0xTT 终止)
         assert_eq!(
             detect_file_type(b"<html><body>hi"),
-            (
-                "text/html; charset=utf-8".to_string(),
-                ".ehtml".to_string()
-            )
+            ("text/html; charset=utf-8".to_string(), ".ehtml".to_string())
         );
         // XML 签名允许前导空白(skip_ws)
         assert_eq!(
@@ -1570,10 +1595,7 @@ mod tests {
         assert_eq!(a.len(), 64);
         assert!(is_lower_hex(&a));
         // 不同密钥产生不同指纹
-        assert_ne!(
-            a,
-            generate_hmac_content_file_name(b"secret-b", content, "")
-        );
+        assert_ne!(a, generate_hmac_content_file_name(b"secret-b", content, ""));
         // 扩展名清理
         assert_eq!(
             generate_hmac_content_file_name(b"k", content, ".jpg"),
@@ -1633,9 +1655,18 @@ mod tests {
         assert!(time_name.contains('_'));
 
         // 字符串值与分派回落
-        assert_eq!(GenerateFileNameType::from("time_base"), GenerateFileNameType::TimeBase);
-        assert_eq!(GenerateFileNameType::from("unknown"), GenerateFileNameType::Uuid);
-        assert_eq!(GenerateFileNameType::ContentSha256.as_str(), "content_sha256");
+        assert_eq!(
+            GenerateFileNameType::from("time_base"),
+            GenerateFileNameType::TimeBase
+        );
+        assert_eq!(
+            GenerateFileNameType::from("unknown"),
+            GenerateFileNameType::Uuid
+        );
+        assert_eq!(
+            GenerateFileNameType::ContentSha256.as_str(),
+            "content_sha256"
+        );
     }
 
     #[test]
@@ -1649,8 +1680,17 @@ mod tests {
 
     #[test]
     fn test_ensure_object_name() {
-        let name = ensure_object_name("docs", "report", "application/pdf", &[], GenerateFileNameType::Uuid);
-        assert!(name.ends_with(".pdf"), "应从 content-type 推断扩展名: {name}");
+        let name = ensure_object_name(
+            "docs",
+            "report",
+            "application/pdf",
+            &[],
+            GenerateFileNameType::Uuid,
+        );
+        assert!(
+            name.ends_with(".pdf"),
+            "应从 content-type 推断扩展名: {name}"
+        );
         assert!(name.starts_with("docs/"));
     }
 
@@ -1669,7 +1709,11 @@ mod tests {
         assert_eq!(url, "http://minio:9000/images/a/b.png");
 
         assert_eq!(
-            replace_endpoint_host("http://minio:9000/a.png", "http://host", "http://minio:9000"),
+            replace_endpoint_host(
+                "http://minio:9000/a.png",
+                "http://host",
+                "http://minio:9000"
+            ),
             "http://host/a.png"
         );
     }
@@ -1765,7 +1809,10 @@ mod tests {
         // MIME 白名单不缺项:前缀 3 条(首 image/ 尾 audio/),精确表 16 条(首 text/plain 尾 pptx)。
         assert_eq!(ALLOWED_MIME_PREFIXES.len(), 3);
         assert_eq!(ALLOWED_MIME_PREFIXES[0], "image/");
-        assert_eq!(ALLOWED_MIME_PREFIXES[ALLOWED_MIME_PREFIXES.len() - 1], "audio/");
+        assert_eq!(
+            ALLOWED_MIME_PREFIXES[ALLOWED_MIME_PREFIXES.len() - 1],
+            "audio/"
+        );
         assert_eq!(ALLOWED_EXACT_MIME_TYPES.len(), 16);
         assert_eq!(ALLOWED_EXACT_MIME_TYPES[0], "text/plain");
         assert_eq!(

@@ -58,7 +58,8 @@ pub fn validate_complexity(plain: &str, min_len: usize) -> Result<(), String> {
             has_symbol = true;
         }
     }
-    let classes = has_lower as usize + has_upper as usize + has_digit as usize + has_symbol as usize;
+    let classes =
+        has_lower as usize + has_upper as usize + has_digit as usize + has_symbol as usize;
     if classes < 3 {
         return Err("密码复杂度不足:需至少包含 小写/大写/数字/符号 四类中的三类".to_string());
     }
@@ -722,7 +723,7 @@ mod tests {
         // 长度按字节计:"a1!密码" 共 9 字节(≥8)且三类齐全
         assert!(validate_complexity("a1!密码", 8).is_ok());
         assert!(validate_complexity("a1!密", 8).is_err()); // 6 字节
-        // 纯 CJK 字符类别为 0,长度再够也拒绝
+                                                           // 纯 CJK 字符类别为 0,长度再够也拒绝
         assert!(validate_complexity("密码密码", 1).is_err());
         // min_len 0 按 1 处理,仅校验类别
         assert!(validate_complexity("abc", 0).is_err());

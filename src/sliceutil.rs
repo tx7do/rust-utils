@@ -191,10 +191,7 @@ pub fn flatten<T: Clone>(input: &[Vec<T>]) -> Vec<T> {
 /// 黑名单过滤:剔除 `data` 中命中 `blacklist` 的元素,保持原顺序。
 pub fn filter_blacklist<T: Eq + std::hash::Hash + Clone>(data: &[T], blacklist: &[T]) -> Vec<T> {
     let bm: std::collections::HashSet<&T> = blacklist.iter().collect();
-    data.iter()
-        .filter(|x| !bm.contains(x))
-        .cloned()
-        .collect()
+    data.iter().filter(|x| !bm.contains(x)).cloned().collect()
 }
 
 /// 把数字切片格式化为逗号分隔的十进制字符串。
@@ -218,7 +215,10 @@ mod tests {
         );
         let empty: Vec<&str> = Vec::new();
         assert_eq!(filter_blacklist::<&str>(&[], &["x"]), empty);
-        assert_eq!(filter_blacklist(&["a", "b"], &[] as &[&str]), vec!["a", "b"]);
+        assert_eq!(
+            filter_blacklist(&["a", "b"], &[] as &[&str]),
+            vec!["a", "b"]
+        );
         assert_eq!(number_slice_to_string(&[1, 20, 300]), "1,20,300");
         assert_eq!(number_slice_to_string(&[]), "");
         assert_eq!(number_slice_to_string(&[7]), "7");
@@ -294,5 +294,72 @@ mod tests {
         assert_eq!(pluck(&users, |u| u.1), vec![1, 3]);
         let nested = vec![vec![1, 2], vec![], vec![3]];
         assert_eq!(flatten(&nested), vec![1, 2, 3]);
+    }
+}
+
+/// 子树收集（visited 防护）：内存 parent→children 映射 + 已访问集合——
+/// 存量环脏数据正常收敛不打转，代替递归 CTE 的方言差异与环挂死风险。
+/// 返回 `root` 及其全部后代（含自身）。`rows` 传 (id, parent_id) 对；
+/// 根节点（parent 为 None）与游离节点不进任何 children 映射。
+///
+/// ```rust
+/// use rust_utils::sliceutil::collect_subtree_ids;
+/// let rows = [(1, None), (2, Some(1)), (3, Some(1)), (4, Some(2))];
+/// let got = collect_subtree_ids(&rows, 1);
+/// // 返回含 root 与全部后代；DFS 序不承诺兄弟间顺序
+/// assert_eq!(got.len(), 4);
+/// assert!(got.contains(&1) && got.contains(&2) && got.contains(&3) && got.contains(&4));
+/// ```
+pub fn collect_subtree_ids(rows: &[(u32, Option<u32>)], root: u32) -> Vec<u32> {
+    let mut children_of: std::collections::HashMap<u32, Vec<u32>> =
+        std::collections::HashMap::new();
+    for &(id, parent) in rows {
+        if let Some(p) = parent {
+            children_of.entry(p).or_default().push(id);
+        }
+    }
+    let mut ids = Vec::with_capacity(16);
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(root);
+    let mut stack = vec![root];
+    while let Some(cur) = stack.pop() {
+        ids.push(cur);
+        if let Some(children) = children_of.get(&cur) {
+            for &child in children {
+                if visited.insert(child) {
+                    stack.push(child);
+                }
+            }
+        }
+    }
+    ids
+}
+
+#[cfg(test)]
+mod subtree_tests {
+    use super::*;
+
+    #[test]
+    fn collects_root_with_all_descendants() {
+        let rows = [(1, None), (2, Some(1)), (3, Some(1)), (4, Some(2))];
+        let got = collect_subtree_ids(&rows, 1);
+        assert_eq!(got.len(), 4);
+        for id in [1, 2, 3, 4] {
+            assert!(got.contains(&id));
+        }
+        // 叶根只含自身
+        assert_eq!(collect_subtree_ids(&rows, 3), vec![3]);
+    }
+
+    /// 环脏数据（外部导入/直改库产生）必须收敛而不是打转挂死。
+    #[test]
+    fn cycle_dirty_data_converges() {
+        // 1 ← 2 ← 3 → 1（环）+ 4 挂在 2 下
+        let rows = [(1, Some(3)), (2, Some(1)), (3, Some(2)), (4, Some(2))];
+        let got = collect_subtree_ids(&rows, 1);
+        assert_eq!(got.len(), 4);
+        for id in [1, 2, 3, 4] {
+            assert!(got.contains(&id));
+        }
     }
 }

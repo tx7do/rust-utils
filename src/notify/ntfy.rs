@@ -14,7 +14,8 @@ use std::io::Read;
 use serde_json::{json, Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// ntfy 官方服务域。
@@ -108,7 +109,13 @@ impl Service {
         if !self.cfg.access_token.is_empty() {
             headers.push(("Authorization", format!("Bearer {}", self.cfg.access_token)));
         } else if !self.cfg.user.is_empty() {
-            headers.push(("Authorization", format!("Basic {}", base64_standard(format!("{}:{}", self.cfg.user, self.cfg.password).as_bytes()))));
+            headers.push((
+                "Authorization",
+                format!(
+                    "Basic {}",
+                    base64_standard(format!("{}:{}", self.cfg.user, self.cfg.password).as_bytes())
+                ),
+            ));
         }
 
         Ok(Outbound {
@@ -206,8 +213,16 @@ fn base64_standard(data: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(TABLE[(n >> 18) as usize & 63] as char);
         out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -243,7 +258,10 @@ mod tests {
         let out = svc.build_request(&msg).unwrap();
 
         assert_eq!(out.method, "POST");
-        assert_eq!(out.url, "https://ntfy.example", "JSON publish 走根路径:主题在 body 里,绕开头注入");
+        assert_eq!(
+            out.url, "https://ntfy.example",
+            "JSON publish 走根路径:主题在 body 里,绕开头注入"
+        );
 
         let header = |name: &str| {
             out.headers
@@ -275,7 +293,9 @@ mod tests {
                 ..Config::default()
             },
         );
-        let out = svc.build_request(&Message::new("t", "").with_content("c")).unwrap();
+        let out = svc
+            .build_request(&Message::new("t", "").with_content("c"))
+            .unwrap();
         let auth = out
             .headers
             .iter()
@@ -287,22 +307,39 @@ mod tests {
 
     #[test]
     fn test_empty_topic_is_not_configured() {
-        let err = service().send(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = service()
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
     #[test]
     fn test_bad_priority_param_rejected() {
         let err = service()
-            .build_request(&Message::new("t", "").with_content("c").with_param("priority", "high"))
+            .build_request(
+                &Message::new("t", "")
+                    .with_content("c")
+                    .with_param("priority", "high"),
+            )
             .unwrap_err();
-        assert!(err.is_not_configured(), "优先级要数字档位,垃圾值在拨号之前拦下");
+        assert!(
+            err.is_not_configured(),
+            "优先级要数字档位,垃圾值在拨号之前拦下"
+        );
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { server_url: "http://127.0.0.1:1".into(), ..Config::default() });
-        let err = svc.send(&Message::new("t", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                server_url: "http://127.0.0.1:1".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("t", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 

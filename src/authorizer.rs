@@ -520,7 +520,10 @@ mod tests {
     impl Provider for PoliciesProvider {
         fn provide_models(&self, _engine_name: &str) -> ModelDataMap {
             let mut m = ModelDataMap::new();
-            m.insert("rbac.rego".to_string(), b"package rbac\n\nallow = true\n".to_vec());
+            m.insert(
+                "rbac.rego".to_string(),
+                b"package rbac\n\nallow = true\n".to_vec(),
+            );
             m
         }
 
@@ -616,10 +619,7 @@ mod tests {
             policies: &PolicyMap,
             _roles: Option<&RoleMap>,
         ) -> Result<(), String> {
-            *self
-                .received
-                .lock()
-                .expect("探针引擎互斥锁不应中毒") = Some(policies.clone());
+            *self.received.lock().expect("探针引擎互斥锁不应中毒") = Some(policies.clone());
             Ok(())
         }
     }
@@ -637,10 +637,7 @@ mod tests {
     #[test]
     fn noop_engine_is_ready_and_reset_is_noop() {
         // 上游 TestNewAuthorizer_NoopEngine:noop 引擎就绪,重载策略成功
-        let a = Authorizer::new(
-            Some(&EngineConfig::new("noop")),
-            Arc::new(StubProvider),
-        );
+        let a = Authorizer::new(Some(&EngineConfig::new("noop")), Arc::new(StubProvider));
         let engine = a.engine().expect("引擎应已创建");
         assert_eq!(engine.name(), "noop");
         assert!(a.reset_policies().is_ok(), "noop 引擎无需装载策略");
@@ -710,7 +707,10 @@ mod tests {
         // 上游 deny_all_engine.go 逐式语义:五个方法全部拒绝并可观测
         let e = DenyAllEngine;
         assert_eq!(e.name(), "deny-all");
-        assert_eq!(e.is_authorized("", "", "", "").unwrap_err(), ERR_DENY_ALL_ENGINE);
+        assert_eq!(
+            e.is_authorized("", "", "", "").unwrap_err(),
+            ERR_DENY_ALL_ENGINE
+        );
         assert_eq!(
             e.projects_authorized(&["u".to_string()], "GET", "/x", &["p1".to_string()])
                 .unwrap_err(),
@@ -737,10 +737,7 @@ mod tests {
         // 上游 TestResetPolicies_ProviderError:引擎存在时 Provider 失败
         // 必须上抛(此处引擎为降级后的 deny-all,Provider 拉取先于
         // 引擎名分派,错误信息即 Provider 的失败原因)
-        let a = Authorizer::new(
-            Some(&EngineConfig::new("casbin")),
-            Arc::new(ErrProvider),
-        );
+        let a = Authorizer::new(Some(&EngineConfig::new("casbin")), Arc::new(ErrProvider));
         assert!(a.engine().is_some());
         assert_eq!(a.reset_policies().unwrap_err(), "provider failure");
     }
@@ -898,10 +895,10 @@ mod tests {
             }
         );
         assert_eq!(make_projects(&[]), Vec::<Project>::new());
-        assert_eq!(make_projects(&["p1", "p2"]), vec![
-            "p1".to_string(),
-            "p2".to_string()
-        ]);
+        assert_eq!(
+            make_projects(&["p1", "p2"]),
+            vec!["p1".to_string(), "p2".to_string()]
+        );
     }
 
     #[test]

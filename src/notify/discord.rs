@@ -13,7 +13,8 @@ use std::io::Read;
 use serde_json::{json, Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// 应答读取上限。
@@ -87,7 +88,10 @@ impl Service {
             // wait=true 才回消息对象,message id 全靠它。
             url: format!("{}?wait=true", self.cfg.webhook_url),
             body: Value::Object(payload).to_string(),
-            headers: vec![("Content-Type", "application/json; charset=utf-8".to_string())],
+            headers: vec![(
+                "Content-Type",
+                "application/json; charset=utf-8".to_string(),
+            )],
         })
     }
 
@@ -120,7 +124,9 @@ impl NotifyService for Service {
     /// 发一条消息。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("discord message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "discord message body is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -176,14 +182,22 @@ mod tests {
     use super::*;
 
     fn service() -> Service {
-        Service::new(true, Config { ref_: "7".into(), webhook_url: "https://discord.example/api/webhooks/1/2".into() })
+        Service::new(
+            true,
+            Config {
+                ref_: "7".into(),
+                webhook_url: "https://discord.example/api/webhooks/1/2".into(),
+            },
+        )
     }
 
     #[test]
     fn test_missing_webhook_url_is_not_configured() {
         let svc = Service::new(true, Config::default());
         assert_eq!(svc.name(), "discord");
-        let err = svc.build_request(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -201,21 +215,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(out.method, "POST");
-        assert_eq!(out.url, "https://discord.example/api/webhooks/1/2?wait=true", "wait=true 才回消息对象");
+        assert_eq!(
+            out.url, "https://discord.example/api/webhooks/1/2?wait=true",
+            "wait=true 才回消息对象"
+        );
 
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         let embeds = payload["embeds"].as_array().unwrap();
         assert_eq!(embeds.len(), 1);
         assert_eq!(embeds[0]["title"], "重置验证码");
         assert_eq!(embeds[0]["description"], "您的验证码是 123456");
-        assert!(payload.get("content").is_none(), "embed 形态下不该再发重复的 content");
+        assert!(
+            payload.get("content").is_none(),
+            "embed 形态下不该再发重复的 content"
+        );
         assert_eq!(out.headers[0].1, "application/json; charset=utf-8");
     }
 
     #[test]
     fn test_build_request_plain_when_no_title() {
         let svc = service();
-        let out = svc.build_request(&Message::new("", "").with_content("只有正文")).unwrap();
+        let out = svc
+            .build_request(&Message::new("", "").with_content("只有正文"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["content"], "只有正文");
         assert!(payload.get("embeds").is_none());
@@ -223,8 +245,16 @@ mod tests {
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { webhook_url: "http://127.0.0.1:1/hook".into(), ..Config::default() });
-        let err = svc.send(&Message::new("", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                webhook_url: "http://127.0.0.1:1/hook".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
@@ -239,7 +269,10 @@ mod tests {
     #[test]
     fn test_rate_limited_is_delivery() {
         // 429(限流)走状态码分支:限流报文进错误文案。
-        let err = status_error(429, r#"{"message":"You are being rate limited.","code":200029}"#);
+        let err = status_error(
+            429,
+            r#"{"message":"You are being rate limited.","code":200029}"#,
+        );
         assert!(err.to_string().contains("429"), "{err}");
         assert!(err.to_string().contains("rate limited"));
         assert!(!err.is_not_configured(), "拨过号被拒 = 投递失败");

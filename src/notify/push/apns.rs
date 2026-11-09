@@ -99,8 +99,9 @@ impl Apns {
                 "apns config incomplete: private_key required".into(),
             ));
         }
-        let key = EncodingKey::from_ec_pem(cfg.private_key.as_bytes())
-            .map_err(|e| NotifyError::NotConfigured(format!("apns private_key parse failed: {e}")))?;
+        let key = EncodingKey::from_ec_pem(cfg.private_key.as_bytes()).map_err(|e| {
+            NotifyError::NotConfigured(format!("apns private_key parse failed: {e}"))
+        })?;
         let api_base = if cfg.api_base.is_empty() {
             if cfg.sandbox {
                 APNS_SANDBOX_URL.to_string()
@@ -110,7 +111,12 @@ impl Apns {
         } else {
             cfg.api_base.clone()
         };
-        Ok(Apns { cfg, api_base, key, token: Mutex::new(CachedToken::default()) })
+        Ok(Apns {
+            cfg,
+            api_base,
+            key,
+            token: Mutex::new(CachedToken::default()),
+        })
     }
 
     /// 取(缓存的)provider token:ES256 JWT,官方有效期 1 小时。
@@ -135,9 +141,13 @@ impl Apns {
     /// 返回 [`ApnsRequestParts`]`(endpoint, headers, body)`;provider token 按实例缓存。
     pub fn build_request(&self, msg: &Message) -> Result<ApnsRequestParts, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("apns device token is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "apns device token is empty".into(),
+            ));
         }
-        if self.cfg.team_id.is_empty() || self.cfg.key_id.is_empty() || self.cfg.bundle_id.is_empty()
+        if self.cfg.team_id.is_empty()
+            || self.cfg.key_id.is_empty()
+            || self.cfg.bundle_id.is_empty()
         {
             return Err(NotifyError::NotConfigured(
                 "apns config incomplete: team_id/key_id/bundle_id required".into(),
@@ -162,9 +172,13 @@ impl Service for Apns {
     /// [`Apns::build_request`] + 外接 HTTP/2 客户端 + [`parse_answer`]。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("apns device token is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "apns device token is empty".into(),
+            ));
         }
-        if self.cfg.team_id.is_empty() || self.cfg.key_id.is_empty() || self.cfg.bundle_id.is_empty()
+        if self.cfg.team_id.is_empty()
+            || self.cfg.key_id.is_empty()
+            || self.cfg.bundle_id.is_empty()
         {
             return Err(NotifyError::NotConfigured(
                 "apns config incomplete: team_id/key_id/bundle_id required".into(),
@@ -195,7 +209,10 @@ pub fn mint_apns_token(
     let mut header = Header::new(Algorithm::ES256);
     header.kid = Some(key_id.to_string());
     header.typ = None; // 上游手拼的 header 只有 alg/kid
-    let claims = Claims { iss: team_id.to_string(), iat };
+    let claims = Claims {
+        iss: team_id.to_string(),
+        iat,
+    };
     jsonwebtoken::encode(&header, &claims, key)
         .map_err(|e| NotifyError::NotConfigured(format!("mint apns provider token failed: {e}")))
 }
@@ -313,8 +330,7 @@ JovJXTlKl+9S8eeXRM8cqE4Da6/zwyHcpasroUk1mTOsTclJBZToCyfP
             for chunk in vals.chunks(4) {
                 // 6 位组左对齐到 32 位字顶部,再取前 (组长度-1) 个整字节
                 // (无填充段:余组不足 4 字符,低位补零后整字节即原文)。
-                let n = chunk.iter().fold(0u32, |acc, &v| (acc << 6) | v)
-                    << (32 - chunk.len() * 6);
+                let n = chunk.iter().fold(0u32, |acc, &v| (acc << 6) | v) << (32 - chunk.len() * 6);
                 let bytes = n.to_be_bytes();
                 let take = chunk.len() - 1;
                 out.extend_from_slice(&bytes[..take]);
@@ -331,7 +347,11 @@ JovJXTlKl+9S8eeXRM8cqE4Da6/zwyHcpasroUk1mTOsTclJBZToCyfP
         assert_eq!(Service::name(&svc), "apns");
         assert_eq!(svc.api_base, APNS_PRODUCTION_URL, "默认生产网关");
 
-        let sandbox = Apns::new(ApnsConfig { sandbox: true, ..config() }).unwrap();
+        let sandbox = Apns::new(ApnsConfig {
+            sandbox: true,
+            ..config()
+        })
+        .unwrap();
         assert_eq!(sandbox.api_base, APNS_SANDBOX_URL, "沙箱开关切沙箱网关");
 
         let err = Apns::new(ApnsConfig {
@@ -386,7 +406,10 @@ JovJXTlKl+9S8eeXRM8cqE4Da6/zwyHcpasroUk1mTOsTclJBZToCyfP
         assert_eq!(v["aps"]["alert"]["title"], "重置验证码");
         assert_eq!(v["aps"]["alert"]["body"], "您的验证码是 123456");
         assert_eq!(v["aps"]["sound"], "default");
-        assert_eq!(v["msg_id"], "7", "Params 展开为顶层自定义键,客户端本地路由按需取");
+        assert_eq!(
+            v["msg_id"], "7",
+            "Params 展开为顶层自定义键,客户端本地路由按需取"
+        );
 
         let headers = build_headers("eyJ", "com.example.app");
         let get = |name: &str| {
@@ -396,7 +419,11 @@ JovJXTlKl+9S8eeXRM8cqE4Da6/zwyHcpasroUk1mTOsTclJBZToCyfP
                 .map(|(_, v)| v.as_str())
                 .unwrap()
         };
-        assert_eq!(get("Authorization"), "bearer eyJ", "provider token 走 bearer 头");
+        assert_eq!(
+            get("Authorization"),
+            "bearer eyJ",
+            "provider token 走 bearer 头"
+        );
         assert_eq!(get("apns-topic"), "com.example.app");
         assert_eq!(get("apns-push-type"), "alert");
         assert_eq!(get("apns-priority"), "10");
@@ -429,12 +456,15 @@ JovJXTlKl+9S8eeXRM8cqE4Da6/zwyHcpasroUk1mTOsTclJBZToCyfP
     /// 对齐上游 TestAPNsPeerRejection:非失效类拒绝是投递失败,不是令牌失效。
     #[test]
     fn test_peer_rejection_classification() {
-        let err = parse_answer(413, Some("PayloadTooLarge"), None, "payload too large").unwrap_err();
+        let err =
+            parse_answer(413, Some("PayloadTooLarge"), None, "payload too large").unwrap_err();
         assert!(!err.is_invalid_token(), "{err}");
         assert!(matches!(err, NotifyError::Delivery(_)));
         assert!(err.to_string().contains("PayloadTooLarge"));
         // 200 成功:apns-id 进回执
-        let id = parse_answer(200, None, Some("apns-msg-1"), "{}").unwrap().unwrap();
+        let id = parse_answer(200, None, Some("apns-msg-1"), "{}")
+            .unwrap()
+            .unwrap();
         assert_eq!(id, "apns-msg-1");
     }
 
@@ -460,7 +490,10 @@ JovJXTlKl+9S8eeXRM8cqE4Da6/zwyHcpasroUk1mTOsTclJBZToCyfP
         })
         .unwrap();
         let err = svc.send(&Message::new("tok", "t")).unwrap_err();
-        assert!(err.to_string().contains("team_id/key_id/bundle_id"), "{err}");
+        assert!(
+            err.to_string().contains("team_id/key_id/bundle_id"),
+            "{err}"
+        );
     }
 
     /// build_request:外接 HTTP/2 客户端可拿齐 URL/头/payload 三件套。
@@ -472,7 +505,9 @@ JovJXTlKl+9S8eeXRM8cqE4Da6/zwyHcpasroUk1mTOsTclJBZToCyfP
         let msg = Message::new("tok64", "t").with_content("c");
         let (endpoint, headers, payload) = svc.build_request(&msg).unwrap();
         assert_eq!(endpoint, "https://api.example.test/3/device/tok64");
-        assert!(headers.iter().any(|(k, v)| k == "Authorization" && v.starts_with("bearer ey")));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "Authorization" && v.starts_with("bearer ey")));
         assert!(payload.contains(r#""aps""#));
     }
 }

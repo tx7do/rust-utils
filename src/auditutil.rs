@@ -222,8 +222,12 @@ pub fn is_private_ip(ip_str: &str) -> bool {
         v4 => v4,
     };
     match ip {
-        IpAddr::V4(v4) => PRIVATE_V4_CIDRS.iter().any(|(net, len)| cidr_contains(net, *len, &v4.octets())),
-        IpAddr::V6(v6) => PRIVATE_V6_CIDRS.iter().any(|(net, len)| cidr_contains(net, *len, &v6.octets())),
+        IpAddr::V4(v4) => PRIVATE_V4_CIDRS
+            .iter()
+            .any(|(net, len)| cidr_contains(net, *len, &v4.octets())),
+        IpAddr::V6(v6) => PRIVATE_V6_CIDRS
+            .iter()
+            .any(|(net, len)| cidr_contains(net, *len, &v6.octets())),
     }
 }
 
@@ -265,7 +269,11 @@ fn cidr_contains(net: &[u8], prefix_len: u8, ip: &[u8]) -> bool {
 /// 获取请求 ID:依次检查 X-Request-ID / X-Correlation-ID / x-fc-request-id
 /// (函数计算),都没有时生成新的 GUID(v4,32 位小写十六进制)。
 pub fn request_id(request: &HttpRequest) -> String {
-    for key in [HEADER_X_REQUEST_ID, HEADER_X_CORRELATION_ID, HEADER_X_FC_REQUEST_ID] {
+    for key in [
+        HEADER_X_REQUEST_ID,
+        HEADER_X_CORRELATION_ID,
+        HEADER_X_FC_REQUEST_ID,
+    ] {
         if let Some(v) = request.header(key) {
             if !v.is_empty() {
                 return v.to_string();
@@ -313,7 +321,12 @@ pub fn detect_platform_from_ua(ua: &str) -> String {
     let s = ua.trim().to_lowercase();
 
     // 原生 Android app 指示器
-    if s.contains("okhttp") || s.contains("dalvik") || s.contains("; wv") || s.contains(" ;wv") || s.contains("build/") {
+    if s.contains("okhttp")
+        || s.contains("dalvik")
+        || s.contains("; wv")
+        || s.contains(" ;wv")
+        || s.contains("build/")
+    {
         return PLATFORM_ANDROID_APP.to_string();
     }
     // 包名模式(com.xxx)且含 android
@@ -322,20 +335,41 @@ pub fn detect_platform_from_ua(ua: &str) -> String {
     }
 
     // 原生 iOS 指示器
-    if s.contains("iphone") || s.contains("ipad") || s.contains("ipod") || s.contains("cfnetwork") || s.contains("darwin") || s.contains("cpu iphone os") {
+    if s.contains("iphone")
+        || s.contains("ipad")
+        || s.contains("ipod")
+        || s.contains("cfnetwork")
+        || s.contains("darwin")
+        || s.contains("cpu iphone os")
+    {
         return PLATFORM_IOS_APP.to_string();
     }
 
     // 桌面原生/混合应用(例如 Electron、nwjs、desktop)
-    if s.contains("electron") || s.contains("nwjs") || s.contains("node.js") || s.contains("nodejs") || s.contains("desktop") || s.contains("appname") {
+    if s.contains("electron")
+        || s.contains("nwjs")
+        || s.contains("node.js")
+        || s.contains("nodejs")
+        || s.contains("desktop")
+        || s.contains("appname")
+    {
         // 根据 UA 中的 OS 关键词区分具体桌面系统
-        if s.contains("windows nt") || s.contains("win64") || s.contains("win32") || s.contains("windows") {
+        if s.contains("windows nt")
+            || s.contains("win64")
+            || s.contains("win32")
+            || s.contains("windows")
+        {
             return PLATFORM_DESKTOP_WINDOWS.to_string();
         }
         if s.contains("macintosh") || s.contains("mac os x") || s.contains("darwin") {
             return PLATFORM_DESKTOP_MAC.to_string();
         }
-        if s.contains("x11") || s.contains("linux") || s.contains("ubuntu") || s.contains("debian") || s.contains("fedora") {
+        if s.contains("x11")
+            || s.contains("linux")
+            || s.contains("ubuntu")
+            || s.contains("debian")
+            || s.contains("fedora")
+        {
             return PLATFORM_DESKTOP_LINUX.to_string();
         }
         // 若未直接包含 OS 关键字,尝试从常见标识推断
@@ -354,10 +388,19 @@ pub fn detect_platform_from_ua(ua: &str) -> String {
 
     // 常见 Web 浏览器识别(Mozilla+桌面/移动系统且无明显原生 app 标志)
     if s.contains("mozilla")
-        && (s.contains("windows nt") || s.contains("macintosh") || s.contains("x11") || s.contains("linux") || s.contains("android") || s.contains("iphone"))
+        && (s.contains("windows nt")
+            || s.contains("macintosh")
+            || s.contains("x11")
+            || s.contains("linux")
+            || s.contains("android")
+            || s.contains("iphone"))
     {
         // 排除明显的原生 app 标志
-        if !s.contains("okhttp") && !s.contains("dalvik") && !s.contains("cfnetwork") && !s.contains("electron") {
+        if !s.contains("okhttp")
+            && !s.contains("dalvik")
+            && !s.contains("cfnetwork")
+            && !s.contains("electron")
+        {
             return PLATFORM_WEB.to_string();
         }
     }
@@ -498,7 +541,10 @@ fn parse_query(body: &[u8]) -> Result<Vec<(String, String)>, String> {
             Some((k, v)) => (k, v),
             None => (part, ""),
         };
-        values.push((unescape_query_component(key)?, unescape_query_component(value)?));
+        values.push((
+            unescape_query_component(key)?,
+            unescape_query_component(value)?,
+        ));
     }
     Ok(values)
 }
@@ -869,19 +915,13 @@ mod tests {
 
     #[test]
     fn test_client_real_ip_xff_first_valid_ip_wins() {
-        let req = build(
-            "10.0.0.1:1000",
-            &[("x-forwarded-for", "8.8.8.8, 10.0.0.2")],
-        );
+        let req = build("10.0.0.1:1000", &[("x-forwarded-for", "8.8.8.8, 10.0.0.2")]);
         assert_eq!(client_real_ip(&req), "8.8.8.8");
     }
 
     #[test]
     fn test_client_real_ip_xff_invalid_entries_skipped() {
-        let req = build(
-            "10.0.0.1:1000",
-            &[("x-forwarded-for", "garbage, 8.8.8.8")],
-        );
+        let req = build("10.0.0.1:1000", &[("x-forwarded-for", "garbage, 8.8.8.8")]);
         assert_eq!(client_real_ip(&req), "8.8.8.8");
     }
 
@@ -942,7 +982,9 @@ mod tests {
         let generated = new_guid_v4_hex();
         assert_eq!(generated.len(), 32);
         assert!(
-            generated.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+            generated
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
             "应为 32 位小写十六进制: {generated}"
         );
     }
@@ -1008,9 +1050,15 @@ mod tests {
             ("com.example.app/1.0 (Android)", PLATFORM_ANDROID_APP),
             ("MyApp/1.0 CFNetwork/1206 Darwin/20.0.0", PLATFORM_IOS_APP),
             ("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0", PLATFORM_IOS_APP),
-            ("Mozilla/5.0 (Windows NT 10.0) Electron/9.0", PLATFORM_DESKTOP_WINDOWS),
+            (
+                "Mozilla/5.0 (Windows NT 10.0) Electron/9.0",
+                PLATFORM_DESKTOP_WINDOWS,
+            ),
             ("Mozilla/5.0 (Macintosh) Electron/9.0", PLATFORM_DESKTOP_MAC),
-            ("Mozilla/5.0 (X11; Linux) Electron/9.0", PLATFORM_DESKTOP_LINUX),
+            (
+                "Mozilla/5.0 (X11; Linux) Electron/9.0",
+                PLATFORM_DESKTOP_LINUX,
+            ),
             (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
                 PLATFORM_WEB,
@@ -1024,7 +1072,10 @@ mod tests {
     #[test]
     fn test_hash_log_deterministic() {
         // 同消息同哈希
-        assert_eq!(hash_log(&new_test_log(), &[]), hash_log(&new_test_log(), &[]));
+        assert_eq!(
+            hash_log(&new_test_log(), &[]),
+            hash_log(&new_test_log(), &[])
+        );
     }
 
     #[test]
@@ -1035,7 +1086,11 @@ mod tests {
         // 填上 log_hash / signature 后哈希不变——这两字段被排除
         log.log_hash = Some("deadbeef".to_string());
         log.signature = Some(vec![1, 2, 3]);
-        assert_eq!(base, hash_log(&log, &[]), "log_hash/signature 不得影响哈希值");
+        assert_eq!(
+            base,
+            hash_log(&log, &[]),
+            "log_hash/signature 不得影响哈希值"
+        );
 
         // 其他字段变化必须改变哈希
         log.action = "logout".to_string();
@@ -1047,7 +1102,11 @@ mod tests {
         let mut log = new_test_log();
         log.log_hash = Some("keepme".to_string());
         let _ = hash_log(&log, &[]);
-        assert_eq!(log.log_hash.as_deref(), Some("keepme"), "哈希不得修改原消息");
+        assert_eq!(
+            log.log_hash.as_deref(),
+            Some("keepme"),
+            "哈希不得修改原消息"
+        );
     }
 
     #[test]
@@ -1128,7 +1187,10 @@ mod tests {
             [0x30, 0x08, 0x02, 0x03, 0x00, 0x80, 0x01, 0x02, 0x01, 0x01]
         );
         // 零值:INTEGER 长度为 0(上游 r/s == 0 的极端分支)
-        assert_eq!(encode_ecdsa_der(&[0x00], &[0x00]), [0x30, 0x04, 0x02, 0x00, 0x02, 0x00]);
+        assert_eq!(
+            encode_ecdsa_der(&[0x00], &[0x00]),
+            [0x30, 0x04, 0x02, 0x00, 0x02, 0x00]
+        );
     }
 
     #[test]
@@ -1169,9 +1231,13 @@ mod tests {
         let parsed: Signature = Signature::try_from(der_sig).unwrap();
 
         // 标准 Verifier:内部对内容做 sha256 后验签(Go verifyECDSA 的等价物)
-        pub_key.verify(sc_json.as_bytes(), &parsed).expect("签名必须能被标准验签");
+        pub_key
+            .verify(sc_json.as_bytes(), &parsed)
+            .expect("签名必须能被标准验签");
         // PrehashVerifier:直接对 sha256 结果验签(Go ecdsa.VerifyASN1 的等价物)
-        pub_key.verify_prehash(&sc_hash, &parsed).expect("prehash 验签必须成功");
+        pub_key
+            .verify_prehash(&sc_hash, &parsed)
+            .expect("prehash 验签必须成功");
 
         // 内容篡改后验签必须失败
         let tampered = sign_content_json_for_verify(7, 42, 1735689600, 0, "tampered");

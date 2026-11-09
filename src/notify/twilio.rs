@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Twilio 官方 API 域。
 pub const DEFAULT_API_BASE: &str = "https://api.twilio.com";
@@ -273,8 +273,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            req.url,
-            "https://api.example.test/2010-04-01/Accounts/AC123/Messages.json",
+            req.url, "https://api.example.test/2010-04-01/Accounts/AC123/Messages.json",
             "SID 要进路径"
         );
         assert_eq!(
@@ -282,10 +281,7 @@ mod tests {
             ("Authorization", "Basic QUMxMjM6dG9r".to_string()),
             "Basic auth(sid:token)"
         );
-        assert_eq!(
-            req.content_type,
-            "application/x-www-form-urlencoded"
-        );
+        assert_eq!(req.content_type, "application/x-www-form-urlencoded");
         let form = &req.body;
         let mut pairs = form.split('&').collect::<Vec<_>>();
         pairs.sort_unstable();

@@ -12,7 +12,8 @@ use std::io::Read;
 use serde_json::Value;
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// Join 官方 API 域。
@@ -100,21 +101,33 @@ impl Service {
             method: "POST",
             url: format!("{}/_ah/api/messaging/v1/sendPush", self.cfg.api_base),
             body: form_encode(&pairs),
-            headers: vec![("Content-Type", "application/x-www-form-urlencoded".to_string())],
+            headers: vec![(
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_string(),
+            )],
         })
     }
 
     /// 解析 2xx 应答:业务结论在 body 的 success。
     fn parse_response(&self, body: &str) -> Result<Receipt, NotifyError> {
-        let answer: Value = serde_json::from_str(body)
-            .map_err(|_| NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body))))?;
-        let success = answer.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let answer: Value = serde_json::from_str(body).map_err(|_| {
+            NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
+        })?;
+        let success = answer
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if !success {
-            let mut error = answer.get("errorMessage").and_then(Value::as_str).unwrap_or("");
+            let mut error = answer
+                .get("errorMessage")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             if error.is_empty() {
                 error = "no message";
             }
-            return Err(NotifyError::Delivery(format!("peer answered success=false: {error}")));
+            return Err(NotifyError::Delivery(format!(
+                "peer answered success=false: {error}"
+            )));
         }
         Ok(Receipt::default())
     }
@@ -138,7 +151,9 @@ impl NotifyService for Service {
     /// 推一条通知到 Target 设备。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("join message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "join message body is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -191,7 +206,9 @@ fn query_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => {
                 out.push('%');
@@ -223,14 +240,23 @@ mod tests {
     use super::*;
 
     fn service() -> Service {
-        Service::new(true, Config { ref_: "7".into(), api_key: "key-1".into(), api_base: "https://join.example".into() })
+        Service::new(
+            true,
+            Config {
+                ref_: "7".into(),
+                api_key: "key-1".into(),
+                api_base: "https://join.example".into(),
+            },
+        )
     }
 
     #[test]
     fn test_missing_api_key_is_not_configured() {
         let svc = Service::new(true, Config::default());
         assert_eq!(svc.name(), "join");
-        let err = svc.build_request(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -248,37 +274,70 @@ mod tests {
             .unwrap();
 
         assert_eq!(out.method, "POST");
-        assert_eq!(out.url, "https://join.example/_ah/api/messaging/v1/sendPush");
+        assert_eq!(
+            out.url,
+            "https://join.example/_ah/api/messaging/v1/sendPush"
+        );
         assert_eq!(out.headers[0].1, "application/x-www-form-urlencoded");
 
         // 表单按键名排序(apikey、deviceIds、text、title)。
         assert!(out.body.contains("apikey=key-1"));
-        assert!(out.body.contains("deviceIds=dev1%2Cdev2"), "多设备逗号相连走 deviceIds");
+        assert!(
+            out.body.contains("deviceIds=dev1%2Cdev2"),
+            "多设备逗号相连走 deviceIds"
+        );
         assert!(out.body.contains("text=%E6%9E%84%E5%BB%BA%E5%AE%8C%E6%88%90%0A%E4%BA%A7%E7%89%A9%E5%B7%B2%E5%B0%B1%E7%BB%AA"),
             "text = 标题行 + 换行 + 正文");
-        assert!(out.body.contains("title=%E6%9E%84%E5%BB%BA%E5%AE%8C%E6%88%90"));
+        assert!(out
+            .body
+            .contains("title=%E6%9E%84%E5%BB%BA%E5%AE%8C%E6%88%90"));
     }
 
     #[test]
     fn test_without_target_pushes_all_devices() {
-        let svc = Service::new(true, Config { api_key: "k".into(), api_base: "https://j.example".into(), ..Config::default() });
-        let out = svc.build_request(&Message::new("", "").with_content("c")).unwrap();
-        assert!(!out.body.contains("deviceIds"), "无 Target 不带 deviceIds,推全部设备");
+        let svc = Service::new(
+            true,
+            Config {
+                api_key: "k".into(),
+                api_base: "https://j.example".into(),
+                ..Config::default()
+            },
+        );
+        let out = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap();
+        assert!(
+            !out.body.contains("deviceIds"),
+            "无 Target 不带 deviceIds,推全部设备"
+        );
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { api_key: "k".into(), api_base: "http://127.0.0.1:1".into(), ..Config::default() });
-        let err = svc.send(&Message::new("", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                api_key: "k".into(),
+                api_base: "http://127.0.0.1:1".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
     #[test]
     fn test_parse_response_failure_answer() {
         let svc = service();
-        assert!(svc.parse_response(r#"{"success":true,"userAccountId":"acc"}"#).is_ok());
+        assert!(svc
+            .parse_response(r#"{"success":true,"userAccountId":"acc"}"#)
+            .is_ok());
 
-        let err = svc.parse_response(r#"{"success":false,"errorMessage":"API key not valid"}"#).unwrap_err();
+        let err = svc
+            .parse_response(r#"{"success":false,"errorMessage":"API key not valid"}"#)
+            .unwrap_err();
         assert!(err.to_string().contains("success=false"), "{err}");
         assert!(err.to_string().contains("API key not valid"));
         assert!(!err.is_not_configured(), "拨过号被拒 = 投递失败");

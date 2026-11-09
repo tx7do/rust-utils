@@ -2,9 +2,9 @@
 //!
 //! 测试离线进行:请求构造与回执解析拆成纯函数断言,不真实连网。
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Datadog US 站点域;欧盟 us3/us5 站点用 [`Config::api_base`] 覆写。
 pub const DEFAULT_API_BASE: &str = "https://api.datadoghq.com";
@@ -80,10 +80,7 @@ impl Service {
             payload["tags"] = json!(self.cfg.tags);
         }
         Ok(Prepared {
-            url: format!(
-                "{}/api/v1/events",
-                self.cfg.api_base.trim_end_matches('/')
-            ),
+            url: format!("{}/api/v1/events", self.cfg.api_base.trim_end_matches('/')),
             body: payload.to_string(),
             content_type: "application/json",
             headers: vec![("DD-API-KEY", self.cfg.api_key.clone())],
@@ -275,11 +272,8 @@ mod tests {
         assert_eq!(receipt.provider_id, "1728312", "事件 ID 要进回执");
 
         // 上游用 403 压测:对端拒收是投递失败,文案带对端说明。
-        let err = Service::parse_answer(
-            403,
-            r#"{"status":"error","errors":["API key invalid"]}"#,
-        )
-        .unwrap_err();
+        let err = Service::parse_answer(403, r#"{"status":"error","errors":["API key invalid"]}"#)
+            .unwrap_err();
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(err.to_string().contains("API key invalid"));
 

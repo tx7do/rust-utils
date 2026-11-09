@@ -15,7 +15,8 @@ use std::io::Read;
 use serde_json::Value;
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// 应答读取上限。
@@ -73,14 +74,21 @@ impl Service {
 
     /// 构造出站请求(纯函数,离线可测)。
     fn build_request(&self, msg: &Message) -> Result<Outbound, NotifyError> {
-        if self.cfg.server_url.is_empty() || self.cfg.bot_email.is_empty() || self.cfg.bot_api_key.is_empty() {
+        if self.cfg.server_url.is_empty()
+            || self.cfg.bot_email.is_empty()
+            || self.cfg.bot_api_key.is_empty()
+        {
             return Err(NotifyError::NotConfigured(
                 "zulip config incomplete: server_url/bot_email/bot_api_key required".into(),
             ));
         }
 
         // topic 按条覆盖默认;两处都没有就拦下——stream 消息没 topic 发不出去。
-        let topic = msg.params.get("topic").cloned().unwrap_or_else(|| self.cfg.topic.clone());
+        let topic = msg
+            .params
+            .get("topic")
+            .cloned()
+            .unwrap_or_else(|| self.cfg.topic.clone());
         if topic.is_empty() {
             return Err(NotifyError::NotConfigured(
                 "zulip requires a topic: set Config.Topic or params[\"topic\"]".into(),
@@ -103,26 +111,43 @@ impl Service {
 
         Ok(Outbound {
             method: "POST",
-            url: format!("{}/api/v1/messages", self.cfg.server_url.trim_end_matches('/')),
+            url: format!(
+                "{}/api/v1/messages",
+                self.cfg.server_url.trim_end_matches('/')
+            ),
             body: form_encode(&pairs),
             headers: vec![
-                ("Authorization", format!("Basic {}", base64_standard(format!("{}:{}", self.cfg.bot_email, self.cfg.bot_api_key).as_bytes()))),
-                ("Content-Type", "application/x-www-form-urlencoded".to_string()),
+                (
+                    "Authorization",
+                    format!(
+                        "Basic {}",
+                        base64_standard(
+                            format!("{}:{}", self.cfg.bot_email, self.cfg.bot_api_key).as_bytes()
+                        )
+                    ),
+                ),
+                (
+                    "Content-Type",
+                    "application/x-www-form-urlencoded".to_string(),
+                ),
             ],
         })
     }
 
     /// 解析 2xx 应答:Zulip 的结论在 body 的 result("success")。
     fn parse_response(&self, body: &str) -> Result<Receipt, NotifyError> {
-        let answer: Value = serde_json::from_str(body)
-            .map_err(|_| NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body))))?;
+        let answer: Value = serde_json::from_str(body).map_err(|_| {
+            NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
+        })?;
         let result = answer.get("result").and_then(Value::as_str).unwrap_or("");
         if result != "success" {
             let mut message = answer.get("msg").and_then(Value::as_str).unwrap_or("");
             if message.is_empty() {
                 message = "no message";
             }
-            return Err(NotifyError::Delivery(format!("peer answered result={result}: {message}")));
+            return Err(NotifyError::Delivery(format!(
+                "peer answered result={result}: {message}"
+            )));
         }
         let mut receipt = Receipt::default();
         if let Some(id) = answer.get("id").and_then(Value::as_i64) {
@@ -210,8 +235,16 @@ fn base64_standard(data: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(TABLE[(n >> 18) as usize & 63] as char);
         out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -222,7 +255,9 @@ fn query_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => {
                 out.push('%');
@@ -269,14 +304,24 @@ mod tests {
     #[test]
     fn test_missing_config_is_not_configured() {
         // 只配 topic:缺 server/bot 凭据。
-        let svc = Service::new(true, Config { topic: "t".into(), ..Config::default() });
-        let err = svc.build_request(&Message::new("ops", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            true,
+            Config {
+                topic: "t".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .build_request(&Message::new("ops", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
     #[test]
     fn test_empty_stream_is_not_configured() {
-        let err = service().send(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = service()
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -293,7 +338,9 @@ mod tests {
                 ..Config::default()
             },
         );
-        let err = svc.build_request(&Message::new("ops", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("ops", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -305,7 +352,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(out.method, "POST");
-        assert_eq!(out.url, "https://zulip.example/api/v1/messages", "基地址尾部斜杠剥掉");
+        assert_eq!(
+            out.url, "https://zulip.example/api/v1/messages",
+            "基地址尾部斜杠剥掉"
+        );
 
         let header = |name: &str| {
             out.headers
@@ -314,13 +364,22 @@ mod tests {
                 .map(|(_, v)| v.clone())
                 .unwrap_or_default()
         };
-        assert_eq!(header("Authorization"), format!("Basic {}", base64_standard(b"bot@example.com:key-1")));
+        assert_eq!(
+            header("Authorization"),
+            format!("Basic {}", base64_standard(b"bot@example.com:key-1"))
+        );
 
         // 表单按键名排序(content、to、topic、type)。
         assert!(out.body.contains("type=stream"));
         assert!(out.body.contains("to=ops"));
-        assert!(out.body.contains("topic=%E5%91%8A%E8%AD%A6"), "stream 消息必须有 topic(Config 默认): {}", out.body);
-        assert!(out.body.contains("content=%E7%A3%81%E7%9B%98%E5%91%8A%E8%AD%A6"));
+        assert!(
+            out.body.contains("topic=%E5%91%8A%E8%AD%A6"),
+            "stream 消息必须有 topic(Config 默认): {}",
+            out.body
+        );
+        assert!(out
+            .body
+            .contains("content=%E7%A3%81%E7%9B%98%E5%91%8A%E8%AD%A6"));
     }
 
     #[test]
@@ -335,9 +394,15 @@ mod tests {
                 topic: "default".into(),
             },
         );
-        let msg = Message::new("ops", "").with_content("c").with_param("topic", "deploy");
+        let msg = Message::new("ops", "")
+            .with_content("c")
+            .with_param("topic", "deploy");
         let out = svc.build_request(&msg).unwrap();
-        assert!(out.body.contains("topic=deploy"), "Params[topic] 按条覆盖: {}", out.body);
+        assert!(
+            out.body.contains("topic=deploy"),
+            "Params[topic] 按条覆盖: {}",
+            out.body
+        );
     }
 
     #[test]
@@ -352,7 +417,9 @@ mod tests {
                 ..Config::default()
             },
         );
-        let err = svc.send(&Message::new("ops", "").with_content("c")).unwrap_err();
+        let err = svc
+            .send(&Message::new("ops", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
@@ -361,16 +428,25 @@ mod tests {
         let svc = service();
 
         // 成功:消息 ID 进回执。
-        let receipt = svc.parse_response(r#"{"result":"success","msg":"","id":3159981}"#).unwrap();
+        let receipt = svc
+            .parse_response(r#"{"result":"success","msg":"","id":3159981}"#)
+            .unwrap();
         assert_eq!(receipt.provider_id, "3159981", "Zulip 的消息 ID 要进回执");
 
-        let err = svc.parse_response(r#"{"result":"error","msg":"stream does not exist"}"#).unwrap_err();
+        let err = svc
+            .parse_response(r#"{"result":"error","msg":"stream does not exist"}"#)
+            .unwrap_err();
         assert!(err.to_string().contains("result=error"), "{err}");
         assert!(err.to_string().contains("stream does not exist"));
         assert!(!err.is_not_configured(), "拨过号被拒 = 投递失败");
 
         // id=0 不进回执。
-        assert_eq!(svc.parse_response(r#"{"result":"success","id":0}"#).unwrap().provider_id, "");
+        assert_eq!(
+            svc.parse_response(r#"{"result":"success","id":0}"#)
+                .unwrap()
+                .provider_id,
+            ""
+        );
 
         // 缺 msg 兜底"no message"。
         let err = svc.parse_response(r#"{"result":"error"}"#).unwrap_err();

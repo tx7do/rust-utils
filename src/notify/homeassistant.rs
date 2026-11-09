@@ -16,7 +16,8 @@ use std::io::Read;
 use serde_json::{json, Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// 默认 notify 服务(手机伴侣 App 的通知平台)。
@@ -111,7 +112,11 @@ impl HASService {
         Ok(Outbound {
             method: "POST",
             // 服务名进路径;真实服务名是字母数字下划线,不做路径转义(与上游 fmt.Sprintf 一致)。
-            url: format!("{}/api/services/notify/{}", self.cfg.server_url.trim_end_matches('/'), self.cfg.service),
+            url: format!(
+                "{}/api/services/notify/{}",
+                self.cfg.server_url.trim_end_matches('/'),
+                self.cfg.service
+            ),
             body: Value::Object(payload).to_string(),
             headers: vec![
                 ("Authorization", format!("Bearer {}", self.cfg.token)),
@@ -144,7 +149,9 @@ impl NotifyService for HASService {
     /// 调一次 notify 服务。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("homeassistant message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "homeassistant message body is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -215,8 +222,16 @@ mod tests {
     #[test]
     fn test_missing_config_is_not_configured() {
         // 只配 server:缺 token。
-        let svc = HASService::new(true, Config { server_url: "http://ha:8123".into(), ..Config::default() });
-        let err = svc.build_request(&Message::new("", "").with_content("c")).unwrap_err();
+        let svc = HASService::new(
+            true,
+            Config {
+                server_url: "http://ha:8123".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -231,11 +246,19 @@ mod tests {
         // api_base 与 server_url 等价(二选一);service 缺省走持久通知。
         let svc = HASService::new(
             true,
-            Config { api_base: "http://ha2.example:8123".into(), token: "t".into(), ..Config::default() },
+            Config {
+                api_base: "http://ha2.example:8123".into(),
+                token: "t".into(),
+                ..Config::default()
+            },
         );
-        let out = svc.build_request(&Message::new("", "").with_content("c")).unwrap();
-        assert_eq!(out.url, "http://ha2.example:8123/api/services/notify/persistent_notification",
-            "缺省走持久通知服务,api_base 兜底基地址");
+        let out = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap();
+        assert_eq!(
+            out.url, "http://ha2.example:8123/api/services/notify/persistent_notification",
+            "缺省走持久通知服务,api_base 兜底基地址"
+        );
     }
 
     #[test]
@@ -247,7 +270,10 @@ mod tests {
         let out = svc.build_request(&msg).unwrap();
 
         assert_eq!(out.method, "POST");
-        assert_eq!(out.url, "http://ha.example:8123/api/services/notify/mobile_app_phone", "服务名进路径");
+        assert_eq!(
+            out.url, "http://ha.example:8123/api/services/notify/mobile_app_phone",
+            "服务名进路径"
+        );
 
         let header = |name: &str| {
             out.headers
@@ -261,22 +287,39 @@ mod tests {
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["message"], "有人在门口");
         assert_eq!(payload["title"], "门铃");
-        assert_eq!(payload["data"]["target"], "entity.kitchen_display", "Target 落 data.target 由平台解释");
+        assert_eq!(
+            payload["data"]["target"], "entity.kitchen_display",
+            "Target 落 data.target 由平台解释"
+        );
         assert_eq!(payload["data"]["channel"], "critical", "Params 原样进 data");
     }
 
     #[test]
     fn test_no_data_when_no_target_and_params() {
         let svc = service();
-        let out = svc.build_request(&Message::new("", "t").with_content("c")).unwrap();
+        let out = svc
+            .build_request(&Message::new("", "t").with_content("c"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
-        assert!(payload.get("data").is_none(), "无 target 无 params 不占 data 字段");
+        assert!(
+            payload.get("data").is_none(),
+            "无 target 无 params 不占 data 字段"
+        );
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = HASService::new(false, Config { server_url: "http://127.0.0.1:1".into(), token: "t".into(), ..Config::default() });
-        let err = svc.send(&Message::new("", "").with_content("c")).unwrap_err();
+        let svc = HASService::new(
+            false,
+            Config {
+                server_url: "http://127.0.0.1:1".into(),
+                token: "t".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 

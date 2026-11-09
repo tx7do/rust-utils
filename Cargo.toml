@@ -42,6 +42,7 @@ crypto = [
     "dep:aes",
     "dep:cbc",
     "dep:aes-gcm",
+    "dep:base64",
     "dep:hmac",
     "dep:sha2",
     "dep:getrandom",
@@ -49,8 +50,12 @@ crypto = [
     "dep:p256",
     "dep:serde_json",
 ]
+# OTP (RFC 6238 TOTP ±1 窗口) 与 RFC 4648 base32 编解码。
+otp = ["dep:hmac", "dep:sha1"]
 # JWT generate / parse / verify / refresh, built on jsonwebtoken.
 jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json", "dep:getrandom"]
+# HTML → PDF 渲染（本机 Chrome/Edge CDP 驱动，自动探测安装路径）。
+printrender = ["dep:chromiumoxide", "dep:futures-util", "dep:tokio"]
 # Random name / nickname generator (embedded Chinese/English/Japanese dictionaries).
 name-generator = ["rand"]
 # Glob-style path matching in fsutil.
@@ -147,6 +152,10 @@ glob = { version = "0.3", optional = true }
 pbkdf2 = { version = "0.12", optional = true }
 bcrypt = { version = "0.15", optional = true }
 argon2 = { version = "0.5", optional = true }
+base64 = { version = "0.22", optional = true }
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"], optional = true }
+futures-util = { version = "0.3", optional = true }
 hmac = { version = "0.12", optional = true }
 sha2 = { version = "0.10", optional = true }
 aes = { version = "0.8", optional = true }

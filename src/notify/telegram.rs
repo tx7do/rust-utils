@@ -11,9 +11,9 @@
 //!
 //! 测试离线进行:请求构造与回执解析拆成纯函数断言,不真实连网。
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Telegram 官方 API 域;测试与自建网关可用 [`Config::api_base`] 覆写。
 pub const DEFAULT_API_BASE: &str = "https://api.telegram.org";
@@ -247,7 +247,9 @@ mod tests {
             ..Config::default()
         });
         let req = svc
-            .build_request(&Message::new("123456", "重置验证码").with_content("您的验证码是 123456"))
+            .build_request(
+                &Message::new("123456", "重置验证码").with_content("您的验证码是 123456"),
+            )
             .unwrap();
         assert_eq!(req.url, "https://api.telegram.org/botTOKEN/sendMessage");
         assert_eq!(req.content_type, "application/json");

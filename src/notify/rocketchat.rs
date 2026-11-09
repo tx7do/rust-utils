@@ -13,7 +13,8 @@ use std::io::Read;
 use serde_json::{json, Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// 应答读取上限。
@@ -69,7 +70,10 @@ impl Service {
 
     /// 构造出站请求(纯函数,离线可测)。
     fn build_request(&self, msg: &Message) -> Result<Outbound, NotifyError> {
-        if self.cfg.server_url.is_empty() || self.cfg.user_id.is_empty() || self.cfg.auth_token.is_empty() {
+        if self.cfg.server_url.is_empty()
+            || self.cfg.user_id.is_empty()
+            || self.cfg.auth_token.is_empty()
+        {
             return Err(NotifyError::NotConfigured(
                 "rocketchat config incomplete: server_url/user_id/auth_token required".into(),
             ));
@@ -88,7 +92,10 @@ impl Service {
 
         Ok(Outbound {
             method: "POST",
-            url: format!("{}/api/v1/chat.postMessage", self.cfg.server_url.trim_end_matches('/')),
+            url: format!(
+                "{}/api/v1/chat.postMessage",
+                self.cfg.server_url.trim_end_matches('/')
+            ),
             body: Value::Object(payload).to_string(),
             headers: vec![
                 ("X-Auth-Token", self.cfg.auth_token.clone()),
@@ -100,18 +107,28 @@ impl Service {
 
     /// 解析 2xx 应答:业务结论在 body 的 success。
     fn parse_response(&self, body: &str) -> Result<Receipt, NotifyError> {
-        let answer: Value = serde_json::from_str(body)
-            .map_err(|_| NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body))))?;
-        let success = answer.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let answer: Value = serde_json::from_str(body).map_err(|_| {
+            NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
+        })?;
+        let success = answer
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if !success {
             let mut error = answer.get("error").and_then(Value::as_str).unwrap_or("");
             if error.is_empty() {
                 error = "no message";
             }
-            return Err(NotifyError::Delivery(format!("peer answered success=false: {error}")));
+            return Err(NotifyError::Delivery(format!(
+                "peer answered success=false: {error}"
+            )));
         }
         let mut receipt = Receipt::default();
-        if let Some(id) = answer.get("message").and_then(|m| m.get("_id")).and_then(Value::as_str) {
+        if let Some(id) = answer
+            .get("message")
+            .and_then(|m| m.get("_id"))
+            .and_then(Value::as_str)
+        {
             receipt.provider_id = id.to_string();
         }
         Ok(receipt)
@@ -136,7 +153,9 @@ impl NotifyService for Service {
     /// 给 Target 发一条消息。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("rocketchat channel is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "rocketchat channel is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -206,14 +225,24 @@ mod tests {
     #[test]
     fn test_missing_config_is_not_configured() {
         // 只配 server_url:缺 user_id/auth_token。
-        let svc = Service::new(true, Config { server_url: "https://example.com".into(), ..Config::default() });
-        let err = svc.build_request(&Message::new("#ops", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            true,
+            Config {
+                server_url: "https://example.com".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .build_request(&Message::new("#ops", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
     #[test]
     fn test_empty_channel_is_not_configured() {
-        let err = service().send(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = service()
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -225,7 +254,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(out.method, "POST");
-        assert_eq!(out.url, "https://rc.example/api/v1/chat.postMessage", "基地址尾部斜杠剥掉");
+        assert_eq!(
+            out.url, "https://rc.example/api/v1/chat.postMessage",
+            "基地址尾部斜杠剥掉"
+        );
 
         let header = |name: &str| {
             out.headers
@@ -246,9 +278,16 @@ mod tests {
     fn test_send_blocked_target() {
         let svc = Service::new(
             false,
-            Config { server_url: "http://127.0.0.1:1".into(), user_id: "u".into(), auth_token: "t".into(), ..Config::default() },
+            Config {
+                server_url: "http://127.0.0.1:1".into(),
+                user_id: "u".into(),
+                auth_token: "t".into(),
+                ..Config::default()
+            },
         );
-        let err = svc.send(&Message::new("#ops", "").with_content("c")).unwrap_err();
+        let err = svc
+            .send(&Message::new("#ops", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
@@ -257,10 +296,14 @@ mod tests {
         let svc = service();
 
         // 成功:消息 _id 进回执。
-        let receipt = svc.parse_response(r#"{"success":true,"message":{"_id":"msg-9"}}"#).unwrap();
+        let receipt = svc
+            .parse_response(r#"{"success":true,"message":{"_id":"msg-9"}}"#)
+            .unwrap();
         assert_eq!(receipt.provider_id, "msg-9", "消息 _id 要进回执");
 
-        let err = svc.parse_response(r#"{"success":false,"error":"invalid-channel"}"#).unwrap_err();
+        let err = svc
+            .parse_response(r#"{"success":false,"error":"invalid-channel"}"#)
+            .unwrap_err();
         assert!(err.to_string().contains("success=false"), "{err}");
         assert!(err.to_string().contains("invalid-channel"));
         assert!(!err.is_not_configured(), "拨过号被拒 = 投递失败");

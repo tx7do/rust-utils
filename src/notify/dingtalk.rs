@@ -10,9 +10,9 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// 钉钉官方 API 域。
 pub const DEFAULT_API_BASE: &str = "https://oapi.dingtalk.com";
@@ -107,7 +107,10 @@ impl Service {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let expires_in = answer.get("expires_in").and_then(Value::as_i64).unwrap_or(0);
+        let expires_in = answer
+            .get("expires_in")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
         if err_code != 0 || token.is_empty() {
             let err_msg = answer
                 .get("errmsg")
@@ -205,7 +208,8 @@ impl Service {
         let mut st = self.lock_token();
         st.token = token.clone();
         st.expires_at = Some(
-            Instant::now() + Duration::from_secs(ttl.saturating_sub(TOKEN_REFRESH_MARGIN.as_secs())),
+            Instant::now()
+                + Duration::from_secs(ttl.saturating_sub(TOKEN_REFRESH_MARGIN.as_secs())),
         );
         Ok(token)
     }
@@ -253,10 +257,7 @@ impl crate::notify::Service for Service {
                 "dingtalk userid_list is empty".to_string(),
             ));
         }
-        if self.cfg.app_key.is_empty()
-            || self.cfg.app_secret.is_empty()
-            || self.cfg.agent_id == 0
-        {
+        if self.cfg.app_key.is_empty() || self.cfg.app_secret.is_empty() || self.cfg.agent_id == 0 {
             return Err(NotifyError::NotConfigured(
                 "dingtalk config incomplete: app_key/app_secret/agent_id required".to_string(),
             ));
@@ -367,20 +368,25 @@ mod tests {
             ..Config::default()
         };
         let req = Service::build_token_request(&cfg);
-        assert!(req.url.ends_with("/gettoken?appkey=key%261&appsecret=secret+1"));
+        assert!(req
+            .url
+            .ends_with("/gettoken?appkey=key%261&appsecret=secret+1"));
     }
 
     // token 应答解析:取 token 与有效期;错误码归投递失败。
     #[test]
     fn test_parse_token_answer() {
-        let (token, expires_in) =
-            Service::parse_token_answer(200, r#"{"errcode":0,"errmsg":"ok","access_token":"tk-1","expires_in":7200}"#)
-                .unwrap();
+        let (token, expires_in) = Service::parse_token_answer(
+            200,
+            r#"{"errcode":0,"errmsg":"ok","access_token":"tk-1","expires_in":7200}"#,
+        )
+        .unwrap();
         assert_eq!(token, "tk-1");
         assert_eq!(expires_in, 7200);
 
-        let err = Service::parse_token_answer(200, r#"{"errcode":40001,"errmsg":"invalid appkey"}"#)
-            .unwrap_err();
+        let err =
+            Service::parse_token_answer(200, r#"{"errcode":40001,"errmsg":"invalid appkey"}"#)
+                .unwrap_err();
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(err.to_string().contains("errcode=40001"));
 
@@ -400,9 +406,9 @@ mod tests {
     #[test]
     fn test_build_push_request_and_payload() {
         let svc = svc();
-        let payload = svc.build_payload(&Message::new("zhangsan|lisi", "审批提醒").with_content(
-            "您有一张单据待审批",
-        ));
+        let payload = svc.build_payload(
+            &Message::new("zhangsan|lisi", "审批提醒").with_content("您有一张单据待审批"),
+        );
         let req = svc.build_push_request("tk-1", &payload);
         assert_eq!(
             req.url,
@@ -414,17 +420,15 @@ mod tests {
         assert_eq!(p["agent_id"], 123, "agent_id 按数字出站");
         assert_eq!(p["userid_list"], "zhangsan|lisi");
         assert_eq!(p["msg"]["msgtype"], "text");
-        assert_eq!(
-            p["msg"]["text"]["content"],
-            "审批提醒\n您有一张单据待审批"
-        );
+        assert_eq!(p["msg"]["text"]["content"], "审批提醒\n您有一张单据待审批");
     }
 
     // 推送应答解析:task_id 进回执;errcode 非零归投递失败。
     #[test]
     fn test_parse_push_answer() {
-        let receipt = Service::parse_push_answer(200, r#"{"errcode":0,"errmsg":"ok","task_id":66779}"#)
-            .unwrap();
+        let receipt =
+            Service::parse_push_answer(200, r#"{"errcode":0,"errmsg":"ok","task_id":66779}"#)
+                .unwrap();
         assert_eq!(receipt.provider_id, "66779", "异步受理的 task_id 要进回执");
 
         let err =

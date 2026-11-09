@@ -126,7 +126,10 @@ mod tests {
             "build message failed: x",
         ] {
             let err = classify_mailer_error(msg);
-            assert!(err.is_not_configured(), "{msg:?} 应归 NotConfigured,得到 {err}");
+            assert!(
+                err.is_not_configured(),
+                "{msg:?} 应归 NotConfigured,得到 {err}"
+            );
         }
         let err = classify_mailer_error("send mail failed: connection refused");
         assert!(

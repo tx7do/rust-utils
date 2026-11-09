@@ -213,7 +213,10 @@ impl ApiPermissionConverter {
         let mut parts: Vec<&str> = p.split('/').collect();
 
         // 去掉开头的 "api"
-        if parts.first().is_some_and(|first| first.eq_ignore_ascii_case("api")) {
+        if parts
+            .first()
+            .is_some_and(|first| first.eq_ignore_ascii_case("api"))
+        {
             parts.remove(0);
         }
 
@@ -350,10 +353,7 @@ fn is_param_segment(seg: &str) -> bool {
         return false;
     };
     let inner = inner.trim();
-    !inner.is_empty()
-        && !inner.contains('/')
-        && !inner.contains('{')
-        && !inner.contains('}')
+    !inner.is_empty() && !inner.contains('/') && !inner.contains('{') && !inner.contains('}')
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +391,10 @@ fn eq_mode(text: &str, lit: &str, m: Mode) -> bool {
         Mode::Exact => text == lit,
         Mode::Upper => {
             text.len() == lit.len()
-                && text.bytes().zip(lit.bytes()).all(|(a, b)| a == b.to_ascii_uppercase())
+                && text
+                    .bytes()
+                    .zip(lit.bytes())
+                    .all(|(a, b)| a == b.to_ascii_uppercase())
         }
         Mode::Ci => text.eq_ignore_ascii_case(lit),
     }
@@ -428,7 +431,13 @@ fn strip_suffix_ci<'a>(s: &'a str, suffix: &str) -> Option<&'a str> {
 /// `(组)(尾)$` 型规则的通用匹配:组与尾均为字面候选,整体命中最左匹配,
 /// 同一位置按候选声明顺序(对应正则的备选顺序与贪婪语义)。
 /// 返回 `前缀 + 组文本 + 附加字面量`。
-fn gt_replace(s: &str, m: Mode, groups: &[&str], tails: &[&str], extra: (&str, &str)) -> Option<String> {
+fn gt_replace(
+    s: &str,
+    m: Mode,
+    groups: &[&str],
+    tails: &[&str],
+    extra: (&str, &str),
+) -> Option<String> {
     let mut best: Option<(usize, usize, usize)> = None; // (起点, 组序, 尾序)
     for (gi, g) in groups.iter().enumerate() {
         for (ti, t) in tails.iter().enumerate() {
@@ -465,7 +474,14 @@ fn gt_replace(s: &str, m: Mode, groups: &[&str], tails: &[&str], extra: (&str, &
 
 /// `([类])尾$` 型规则:剥离尾字面后,组是紧邻尾部的单个字符,须命中字符集
 /// (`negate` 为 true 表示取反,如 `[^f]`)。返回 `前缀 + 组字符 + 附加字面量`。
-fn class_tail_replace(s: &str, m: Mode, tail: (&str, &str), set: &str, negate: bool, extra: (&str, &str)) -> Option<String> {
+fn class_tail_replace(
+    s: &str,
+    m: Mode,
+    tail: (&str, &str),
+    set: &str,
+    negate: bool,
+    extra: (&str, &str),
+) -> Option<String> {
     let pre = strip_mode(s, tail.0, tail.1, m)?;
     let idx = pre.char_indices().next_back()?.0;
     let c = pre[idx..].chars().next()?;
@@ -473,7 +489,12 @@ fn class_tail_replace(s: &str, m: Mode, tail: (&str, &str), set: &str, negate: b
     if hit == negate {
         return None;
     }
-    Some(format!("{}{}{}", &pre[..idx], &pre[idx..], lit(extra.0, extra.1, m)))
+    Some(format!(
+        "{}{}{}",
+        &pre[..idx],
+        &pre[idx..],
+        lit(extra.0, extra.1, m)
+    ))
 }
 
 /// 按模式比较单字符(集合字符一律以小写声明)。
@@ -490,34 +511,34 @@ type RuleFn = fn(&str, Mode) -> Option<String>;
 /// `jinzhu/inflection` 的 `singularInflections` 规则表(原声明顺序);
 /// 应用时逆序遍历,与 `compile()` 产出的编译链顺序一致。
 const SINGULAR_RULES: &[RuleFn] = &[
-    r_strip_s,     // {"s$", ""}
-    r_keep_ss,     // {"(ss)$", "${1}"}
-    r_news,        // {"(n)ews$", "${1}ews"}
-    r_ta_um,       // {"([ti])a$", "${1}um"}
-    r_osis,        // {"((a)naly|(b)a|(d)iagno|(p)arenthe|(p)rogno|(s)ynop|(t)he)(sis|ses)$", "${1}sis"}
-    r_analy,       // {"(^analy)(sis|ses)$", "${1}sis"}
-    r_ves_fe,      // {"([^f])ves$", "${1}fe"}
-    r_hives,       // {"(hive)s$", "${1}"}
-    r_tives,       // {"(tive)s$", "${1}"}
-    r_lr_ves_f,    // {"([lr])ves$", "${1}f"}
+    r_strip_s,      // {"s$", ""}
+    r_keep_ss,      // {"(ss)$", "${1}"}
+    r_news,         // {"(n)ews$", "${1}ews"}
+    r_ta_um,        // {"([ti])a$", "${1}um"}
+    r_osis, // {"((a)naly|(b)a|(d)iagno|(p)arenthe|(p)rogno|(s)ynop|(t)he)(sis|ses)$", "${1}sis"}
+    r_analy, // {"(^analy)(sis|ses)$", "${1}sis"}
+    r_ves_fe, // {"([^f])ves$", "${1}fe"}
+    r_hives, // {"(hive)s$", "${1}"}
+    r_tives, // {"(tive)s$", "${1}"}
+    r_lr_ves_f, // {"([lr])ves$", "${1}f"}
     r_consonant_y, // {"([^aeiouy]|qu)ies$", "${1}y"}
-    r_series,      // {"(s)eries$", "${1}eries"}
-    r_movies,      // {"(m)ovies$", "${1}ovie"}
-    r_cookies,     // {"(c)ookies$", "${1}ookie"}
-    r_xch_es,      // {"(x|ch|ss|sh)es$", "${1}"}
-    r_mice,        // {"^(m|l)ice$", "${1}ouse"}
-    r_bus,         // {"(bus)(es)?$", "${1}"}
-    r_oes,         // {"(o)es$", "${1}"}
-    r_shoes,       // {"(shoe)s$", "${1}"}
-    r_cris_test,   // {"(cris|test)(is|es)$", "${1}is"}
-    r_axis,        // {"^(a)x[ie]s$", "${1}xis"}
-    r_octopus,     // {"(octop|vir)(us|i)$", "${1}us"}
-    r_alias_status,// {"(alias|status)(es)?$", "${1}"}
-    r_oxen,        // {"^(ox)en", "${1}"}
-    r_vert_ex,     // {"(vert|ind)ices$", "${1}ex"}
-    r_matr_ix,     // {"(matr)ices$", "${1}ix"}
-    r_quiz,        // {"(quiz)zes$", "${1}"}
-    r_databases,   // {"(database)s$", "${1}"}
+    r_series, // {"(s)eries$", "${1}eries"}
+    r_movies, // {"(m)ovies$", "${1}ovie"}
+    r_cookies, // {"(c)ookies$", "${1}ookie"}
+    r_xch_es, // {"(x|ch|ss|sh)es$", "${1}"}
+    r_mice, // {"^(m|l)ice$", "${1}ouse"}
+    r_bus,  // {"(bus)(es)?$", "${1}"}
+    r_oes,  // {"(o)es$", "${1}"}
+    r_shoes, // {"(shoe)s$", "${1}"}
+    r_cris_test, // {"(cris|test)(is|es)$", "${1}is"}
+    r_axis, // {"^(a)x[ie]s$", "${1}xis"}
+    r_octopus, // {"(octop|vir)(us|i)$", "${1}us"}
+    r_alias_status, // {"(alias|status)(es)?$", "${1}"}
+    r_oxen, // {"^(ox)en", "${1}"}
+    r_vert_ex, // {"(vert|ind)ices$", "${1}ex"}
+    r_matr_ix, // {"(matr)ices$", "${1}ix"}
+    r_quiz, // {"(quiz)zes$", "${1}"}
+    r_databases, // {"(database)s$", "${1}"}
 ];
 
 // —— 常规规则,逐条对应 singularInflections(下标即原序) ——
@@ -596,11 +617,24 @@ fn r_consonant_y(s: &str, m: Mode) -> Option<String> {
     if let Some(idx) = pre.char_indices().next_back().map(|(i, _)| i) {
         let c = pre[idx..].chars().next()?;
         if !eq_mode_char_set(c, "aeiouy", m) {
-            return Some(format!("{}{}{}", &pre[..idx], &pre[idx..], lit("y", "Y", m)));
+            return Some(format!(
+                "{}{}{}",
+                &pre[..idx],
+                &pre[idx..],
+                lit("y", "Y", m)
+            ));
         }
     }
-    if pre.len() >= 2 && pre.is_char_boundary(pre.len() - 2) && eq_mode(&pre[pre.len() - 2..], "qu", m) {
-        return Some(format!("{}{}{}", &pre[..pre.len() - 2], &pre[pre.len() - 2..], lit("y", "Y", m)));
+    if pre.len() >= 2
+        && pre.is_char_boundary(pre.len() - 2)
+        && eq_mode(&pre[pre.len() - 2..], "qu", m)
+    {
+        return Some(format!(
+            "{}{}{}",
+            &pre[..pre.len() - 2],
+            &pre[pre.len() - 2..],
+            lit("y", "Y", m)
+        ));
     }
     None
 }
@@ -806,15 +840,28 @@ mod tests {
             ("create user", "POST", "/v1/users", "user:create"),
             ("update user", "PUT", "/v1/users/{id}", "user:edit"),
             ("delete user", "DELETE", "/v1/users/{id}", "user:delete"),
-            ("nested admin settings", "GET", "/api/v1/admin/settings", "admin:view"),
+            (
+                "nested admin settings",
+                "GET",
+                "/api/v1/admin/settings",
+                "admin:view",
+            ),
             ("hyphen group", "GET", "/v1/user-groups", "user-group:view"),
-            ("get task by typeNames", "GET", "/admin/v1/tasks:type-names", "task:view"),
+            (
+                "get task by typeNames",
+                "GET",
+                "/admin/v1/tasks:type-names",
+                "task:view",
+            ),
             ("walk route", "GET", "/admin/v1/apis/walk-route", "api:view"),
         ];
 
         for (name, method, path, want) in cases {
             let got = c.convert_code_by_path(method, path);
-            assert_eq!(got, want, "ConvertCodeByPath({method:?}, {path:?}) [{name}]");
+            assert_eq!(
+                got, want,
+                "ConvertCodeByPath({method:?}, {path:?}) [{name}]"
+            );
         }
     }
 
@@ -823,9 +870,21 @@ mod tests {
         let c = ApiPermissionConverter::new();
 
         let cases: [(&str, &str, &str); 5] = [
-            ("rpc with service and name", "TaskService_ListTaskTypeName", "task:task-type-name:view"),
-            ("rpc without Service suffix", "Task_ListTaskTypeName", "task:task-type-name:view"),
-            ("get walk route data", "ApiService_GetWalkRouteData", "api:walk-route-data:view"),
+            (
+                "rpc with service and name",
+                "TaskService_ListTaskTypeName",
+                "task:task-type-name:view",
+            ),
+            (
+                "rpc without Service suffix",
+                "Task_ListTaskTypeName",
+                "task:task-type-name:view",
+            ),
+            (
+                "get walk route data",
+                "ApiService_GetWalkRouteData",
+                "api:walk-route-data:view",
+            ),
             ("rpc without name", "Task_List", "task:view"),
             ("invalid rpc format", "GetStatus", ""),
         ];
@@ -852,7 +911,11 @@ mod tests {
             ("double slash after version", "/api/v1//admin", "admin"),
             ("version with minor", "/api/v1.9/admin", "admin"),
             ("no version path", "/foo/bar", "foo/bar"),
-            ("no version path with colon", "/admin/v1/tasks:type-names", "tasks:type-names"),
+            (
+                "no version path with colon",
+                "/admin/v1/tasks:type-names",
+                "tasks:type-names",
+            ),
         ];
 
         for (name, input, want) in cases {
@@ -873,12 +936,20 @@ mod tests {
             ("param with spaces", "/{ id }/", ""),
             ("simple resource", "/users", "users"),
             ("resource with param", "/users/{id}", "users"),
-            ("nested resources", "/users/{id}/posts/{postId}", "users/posts"),
+            (
+                "nested resources",
+                "/users/{id}/posts/{postId}",
+                "users/posts",
+            ),
             ("trailing slash", "/users/{id}/posts/", "users/posts"),
             ("leading param", "/{id}/users", "users"),
             ("all params", "/{id}/{pid}", ""),
             ("double slashes", "/users//{id}//posts", "users/posts"),
-            ("colon segment", "/tasks:type-names/{id}", "tasks:type-names"),
+            (
+                "colon segment",
+                "/tasks:type-names/{id}",
+                "tasks:type-names",
+            ),
         ];
 
         for (name, input, want) in cases {
@@ -899,9 +970,17 @@ mod tests {
             ("hyphen segments", "tasks-users", "task-user"),
             ("underline segments", "tasks_users", "task_user"),
             ("slash and underscore", "tasks/type_names", "task/type_name"),
-            ("mixed separators", "tasks::names--items", "task::name--item"),
+            (
+                "mixed separators",
+                "tasks::names--items",
+                "task::name--item",
+            ),
             ("irregular plural", "statuses:passes", "status:pass"),
-            ("multiple separators preserved", "tasks--and__more::names", "task--and__more::name"),
+            (
+                "multiple separators preserved",
+                "tasks--and__more::names",
+                "task--and__more::name",
+            ),
         ];
 
         for (name, input, want) in cases {
@@ -922,9 +1001,24 @@ mod tests {
             ("PUT -> edit", "PUT", "/v1/users/1", "edit"),
             ("PATCH -> edit", "PATCH", "/v1/users/1", "edit"),
             ("DELETE -> delete", "DELETE", "/v1/users/1", "delete"),
-            ("unknown method -> lowercase", "OPTIONS", "/v1/users", "options"),
-            ("path ends with /list overrides method", "POST", "/v1/users/list", "view"),
-            ("path ends with /list and GET", "GET", "/v1/users/list", "view"),
+            (
+                "unknown method -> lowercase",
+                "OPTIONS",
+                "/v1/users",
+                "options",
+            ),
+            (
+                "path ends with /list overrides method",
+                "POST",
+                "/v1/users/list",
+                "view",
+            ),
+            (
+                "path ends with /list and GET",
+                "GET",
+                "/v1/users/list",
+                "view",
+            ),
         ];
 
         for (name, method, path, want) in cases {
@@ -971,15 +1065,22 @@ mod tests {
     #[test]
     fn test_convert_code_by_operation_id_name_arm() {
         let c = ApiPermissionConverter::new();
-        assert_eq!(c.convert_code_by_operation_id("TaskService_Update_TaskName"), "task:task-name:edit");
+        assert_eq!(
+            c.convert_code_by_operation_id("TaskService_Update_TaskName"),
+            "task:task-name:edit"
+        );
         assert_eq!(c.convert_code_by_operation_id("Foo_list"), "foo:view");
     }
 
     #[test]
     fn test_split_camel_after_first_word_edges() {
         let c = ApiPermissionConverter::new();
-        let cases: [(&str, &str, &str); 4] =
-            [("", "", ""), ("lower", "lower", ""), ("List", "List", ""), ("ListFoo", "List", "Foo")];
+        let cases: [(&str, &str, &str); 4] = [
+            ("", "", ""),
+            ("lower", "lower", ""),
+            ("List", "List", ""),
+            ("ListFoo", "List", "Foo"),
+        ];
         for (input, first, rest) in cases {
             let (f, r) = c.split_camel_after_first_word(input);
             assert_eq!(f, first, "first({input:?})");
@@ -1001,8 +1102,16 @@ mod tests {
     #[test]
     fn test_strip_version_prefix_edge_cases() {
         let c = ApiPermissionConverter::new();
-        assert_eq!(c.strip_version_prefix("/API/V1/x"), "x", "api/vN 剥离大小写不敏感");
-        assert_eq!(c.strip_version_prefix("/v1/api/users"), "users", "中段 api 段被过滤");
+        assert_eq!(
+            c.strip_version_prefix("/API/V1/x"),
+            "x",
+            "api/vN 剥离大小写不敏感"
+        );
+        assert_eq!(
+            c.strip_version_prefix("/v1/api/users"),
+            "users",
+            "中段 api 段被过滤"
+        );
         assert_eq!(c.strip_version_prefix("/api"), "", "仅 api 段归空");
         assert_eq!(c.strip_version_prefix("   "), "", "空白归空");
     }
@@ -1020,7 +1129,11 @@ mod tests {
             ("Foo_del", "foo:delete"),
         ];
         for (input, want) in cases {
-            assert_eq!(c.convert_code_by_operation_id(input), want, "ConvertCodeByOperationID({input:?})");
+            assert_eq!(
+                c.convert_code_by_operation_id(input),
+                want,
+                "ConvertCodeByOperationID({input:?})"
+            );
         }
     }
 }

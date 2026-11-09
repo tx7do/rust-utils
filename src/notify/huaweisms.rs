@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use sha2::{Digest, Sha256};
 
 use crate::notify::sms::normalize_phone_number;
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// APP 接入地址(按申请的短信应用所在区域,控制台可查)。
 pub const DEFAULT_API_BASE: &str = "https://smsapi.cn-north-4.myhuaweicloud.com";
@@ -109,10 +109,16 @@ impl Service {
             ("templateId".to_string(), self.cfg.template_id.clone()),
         ];
         if !msg.params.is_empty() {
-            pairs.push(("templateParas".to_string(), template_paras_json(&msg.params)));
+            pairs.push((
+                "templateParas".to_string(),
+                template_paras_json(&msg.params),
+            ));
         }
         if !self.cfg.status_callback.is_empty() {
-            pairs.push(("statusCallback".to_string(), self.cfg.status_callback.clone()));
+            pairs.push((
+                "statusCallback".to_string(),
+                self.cfg.status_callback.clone(),
+            ));
         }
         Ok(Prepared {
             url: format!("{}{SEND_PATH}", self.cfg.api_base),
@@ -380,7 +386,8 @@ mod tests {
             .unwrap_err();
         assert!(err.is_not_configured(), "{err}");
         assert!(
-            err.to_string().contains("app_key/app_secret/sender/template_id"),
+            err.to_string()
+                .contains("app_key/app_secret/sender/template_id"),
             "{err}"
         );
 
@@ -416,8 +423,7 @@ mod tests {
             .build_request(&Message::new("13800138000", "").with_param("code", "123456"))
             .unwrap();
         assert_eq!(
-            req.url,
-            "https://smsapi.cn-north-4.myhuaweicloud.com/sms/batchSendSms/v1",
+            req.url, "https://smsapi.cn-north-4.myhuaweicloud.com/sms/batchSendSms/v1",
             "官方单发也走批量路径"
         );
         assert_eq!(req.content_type, "application/x-www-form-urlencoded");
@@ -448,7 +454,11 @@ mod tests {
 
         // 表单关键字段。
         assert!(req.body.contains("from=csms100000001"), "{}", req.body);
-        assert!(req.body.contains("to=%2B8613800138000"), "手机号 E.164 出站: {}", req.body);
+        assert!(
+            req.body.contains("to=%2B8613800138000"),
+            "手机号 E.164 出站: {}",
+            req.body
+        );
         assert!(req.body.contains("templateId=tpl-1"), "{}", req.body);
         assert!(
             req.body.contains("templateParas=%5B%22123456%22%5D"),
@@ -524,7 +534,8 @@ mod tests {
             .build_request(&Message::new("13800138000", "").with_param("code", "1"))
             .unwrap();
         assert!(
-            req.body.contains("statusCallback=https%3A%2F%2Fcb.example.com%2Fsms"),
+            req.body
+                .contains("statusCallback=https%3A%2F%2Fcb.example.com%2Fsms"),
             "{}",
             req.body
         );
@@ -541,7 +552,8 @@ mod tests {
         assert_eq!(sms_id, "d6e3cdd0", "smsMsgId 要进回执");
 
         // 成功但无 result:回执留空。
-        let sms_id = Service::parse_answer(200, r#"{"code":"000000","description":"Success"}"#).unwrap();
+        let sms_id =
+            Service::parse_answer(200, r#"{"code":"000000","description":"Success"}"#).unwrap();
         assert_eq!(sms_id, "");
 
         let err = Service::parse_answer(

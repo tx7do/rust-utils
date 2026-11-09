@@ -194,7 +194,11 @@ impl SmtpConfig {
     /// * `from_name` 非空时包成带显示名的 [`Mailbox`]。
     fn sender_mailbox(&self) -> Result<Mailbox, String> {
         let from = self.from.trim();
-        let address = if from.is_empty() { self.username.trim() } else { from };
+        let address = if from.is_empty() {
+            self.username.trim()
+        } else {
+            from
+        };
         if address.is_empty() {
             return Err("sender address is empty".to_owned());
         }
@@ -233,7 +237,12 @@ impl SmtpConfig {
 /// assert!(formatted.contains("To: rcpt1@example.test, rcpt2@example.test\r\n"));
 /// assert!(formatted.contains("Subject: plain subject\r\n"));
 /// ```
-pub fn build_message(cfg: &SmtpConfig, to: &[&str], subject: &str, body: &str) -> Result<Message, String> {
+pub fn build_message(
+    cfg: &SmtpConfig,
+    to: &[&str],
+    subject: &str,
+    body: &str,
+) -> Result<Message, String> {
     let from = cfg.sender_mailbox()?;
 
     let mut builder = Message::builder().from(from);
@@ -363,9 +372,21 @@ mod tests {
 
     #[test]
     fn build_message_single_recipient_bytes() {
-        let cfg = SmtpConfig::new("smtp.example.test", 25, "", "", "sender@example.test", "NONE");
-        let message = build_message(&cfg, &["rcpt1@example.test"], "unit test subject", "body line 1\r\nbody line 2")
-            .unwrap();
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "",
+            "",
+            "sender@example.test",
+            "NONE",
+        );
+        let message = build_message(
+            &cfg,
+            &["rcpt1@example.test"],
+            "unit test subject",
+            "body line 1\r\nbody line 2",
+        )
+        .unwrap();
 
         // 与上游一致:逐字节锁定 From/To/Subject/MIME 头、空行分隔与正文。
         // 差异(文档已注明):lettre 额外带 Content-Transfer-Encoding,
@@ -385,10 +406,21 @@ mod tests {
 
     #[test]
     fn build_message_multiple_recipients_joined_by_comma() {
-        let cfg = SmtpConfig::new("smtp.example.test", 25, "", "", "noreply@example.test", "NONE");
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "",
+            "",
+            "noreply@example.test",
+            "NONE",
+        );
         let message = build_message(
             &cfg,
-            &["rcpt1@example.test", "rcpt2@example.test", "rcpt3@example.test"],
+            &[
+                "rcpt1@example.test",
+                "rcpt2@example.test",
+                "rcpt3@example.test",
+            ],
             "multi subject",
             "multi body",
         )
@@ -412,7 +444,14 @@ mod tests {
         // 上游断言空字段也逐条发出头行。lettre 要求 From 必须是合法地址
         // (空 From 场景收紧为报错,见 sender_mailbox 文档),这里保留
         // 空 Subject / 空正文的头部齐备性断言。
-        let cfg = SmtpConfig::new("smtp.example.test", 25, "", "", "sender@example.test", "NONE");
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "",
+            "",
+            "sender@example.test",
+            "NONE",
+        );
         let message = build_message(&cfg, &["rcpt@example.test"], "", "").unwrap();
 
         assert_eq!(
@@ -432,15 +471,30 @@ mod tests {
     fn build_message_cjk_subject_is_rfc2047_encoded() {
         // 上游把非 ASCII 主题裸写进头部(依赖服务端容忍);lettre 按
         // RFC 2047 编码——语义升级,裸中文毁头部的隐患被消除。
-        let cfg = SmtpConfig::new("smtp.example.test", 25, "", "", "sender@example.test", "NONE");
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "",
+            "",
+            "sender@example.test",
+            "NONE",
+        );
         let message = build_message(&cfg, &["rcpt@example.test"], "单元测试主题", "正文").unwrap();
         let formatted = String::from_utf8(message.formatted()).unwrap();
 
-        assert!(formatted.contains("Subject: =?utf-8?"), "非 ASCII 主题必须走 RFC 2047 编码");
-        assert!(!formatted.contains("Subject: 单元测试主题"), "主题不允许裸写");
+        assert!(
+            formatted.contains("Subject: =?utf-8?"),
+            "非 ASCII 主题必须走 RFC 2047 编码"
+        );
+        assert!(
+            !formatted.contains("Subject: 单元测试主题"),
+            "主题不允许裸写"
+        );
         // 非 ASCII 正文自动带上非 7bit 的传输编码
-        assert!(formatted.contains("Content-Transfer-Encoding: quoted-printable\r\n")
-            || formatted.contains("Content-Transfer-Encoding: base64\r\n"));
+        assert!(
+            formatted.contains("Content-Transfer-Encoding: quoted-printable\r\n")
+                || formatted.contains("Content-Transfer-Encoding: base64\r\n")
+        );
     }
 
     // ------------------------------------------------------------------
@@ -451,8 +505,15 @@ mod tests {
     #[test]
     fn from_name_with_space_is_quoted_in_from_header() {
         // 带空格的显示名按 RFC 5322 加引号——收件客户端照样显示为 GoWind Shop。
-        let cfg = SmtpConfig::new("smtp.example.test", 465, "", "", "noreply@example.test", "SSL")
-            .with_from_name("GoWind Shop");
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            465,
+            "",
+            "",
+            "noreply@example.test",
+            "SSL",
+        )
+        .with_from_name("GoWind Shop");
         let message = build_message(&cfg, &["to@example.test"], "s", "b").unwrap();
         let formatted = String::from_utf8(message.formatted()).unwrap();
 
@@ -464,8 +525,15 @@ mod tests {
 
     #[test]
     fn from_name_non_ascii_is_rfc2047_encoded() {
-        let cfg = SmtpConfig::new("smtp.example.test", 465, "", "", "noreply@example.test", "SSL")
-            .with_from_name("风行商店");
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            465,
+            "",
+            "",
+            "noreply@example.test",
+            "SSL",
+        )
+        .with_from_name("风行商店");
         let message = build_message(&cfg, &["to@example.test"], "s", "b").unwrap();
         let formatted = String::from_utf8(message.formatted()).unwrap();
 
@@ -479,7 +547,14 @@ mod tests {
     #[test]
     fn from_name_empty_keeps_bare_address() {
         // FromName 为空时 From 头保持裸地址,与既有对端的解析习惯逐字节兼容。
-        let cfg = SmtpConfig::new("smtp.example.test", 25, "", "", "noreply@example.test", "NONE");
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "",
+            "",
+            "noreply@example.test",
+            "NONE",
+        );
         let message = build_message(&cfg, &["to@example.test"], "s", "b").unwrap();
         let formatted = String::from_utf8(message.formatted()).unwrap();
 
@@ -490,7 +565,14 @@ mod tests {
     fn from_falls_back_to_username() {
         // 对应上游"From/Username 皆空时回退"的显式 From 用例:From 空时
         // 回退为 Username。
-        let cfg = SmtpConfig::new("smtp.example.test", 25, "fallback@example.test", "", "", "NONE");
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "fallback@example.test",
+            "",
+            "",
+            "NONE",
+        );
         let mailbox = cfg.sender_mailbox().unwrap();
         assert_eq!(mailbox.email.to_string(), "fallback@example.test");
         assert!(mailbox.name.is_none());
@@ -511,7 +593,14 @@ mod tests {
     #[test]
     fn from_is_trimmed() {
         // 对应 Go 版 strings.TrimSpace(cfg.From)
-        let cfg = SmtpConfig::new("smtp.example.test", 25, "", "", "  sender@example.test  ", "NONE");
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "",
+            "",
+            "  sender@example.test  ",
+            "NONE",
+        );
         let mailbox = cfg.sender_mailbox().unwrap();
         assert_eq!(mailbox.email.to_string(), "sender@example.test");
     }
@@ -587,7 +676,10 @@ mod tests {
         // 同样发生在拨号之前。
         let cfg = SmtpConfig::new("127.0.0.1", 25, "", "", "sender@example.test", "NONE");
         let err = send_mail(&cfg, &["not-an-address"], "subject", "body").unwrap_err();
-        assert!(err.starts_with("invalid recipient address"), "实际错误: {err}");
+        assert!(
+            err.starts_with("invalid recipient address"),
+            "实际错误: {err}"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -599,14 +691,31 @@ mod tests {
     #[test]
     fn build_transport_accepts_all_supported_modes() {
         for mode in ["NONE", "", "START_TLS", "none", "ssl", "SSL"] {
-            let cfg = SmtpConfig::new("smtp.example.test", 25, "user", "pw", "sender@example.test", mode);
-            assert!(build_transport(&cfg).is_ok(), "模式 {mode:?} 应能装配 transport");
+            let cfg = SmtpConfig::new(
+                "smtp.example.test",
+                25,
+                "user",
+                "pw",
+                "sender@example.test",
+                mode,
+            );
+            assert!(
+                build_transport(&cfg).is_ok(),
+                "模式 {mode:?} 应能装配 transport"
+            );
         }
     }
 
     #[test]
     fn build_transport_rejects_unsupported_mode() {
-        let cfg = SmtpConfig::new("smtp.example.test", 25, "", "", "sender@example.test", "SSL_TLS");
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "",
+            "",
+            "sender@example.test",
+            "SSL_TLS",
+        );
         let err = build_transport(&cfg).unwrap_err();
         assert_eq!(err, "unsupported tls mode: SSL_TLS");
     }

@@ -14,9 +14,9 @@
 //!
 //! 测试离线进行:请求构造、Basic Auth 与错误归类拆成纯函数断言,不真实连网。
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// JPush 官方 API 域。
 pub const DEFAULT_API_BASE: &str = "https://api.jpush.cn";
@@ -125,7 +125,9 @@ impl crate::notify::Service for Service {
         if !(200..300).contains(&status) {
             return Err(parse_error(status, &body));
         }
-        Ok(Receipt { provider_id: parse_msg_id(&body) })
+        Ok(Receipt {
+            provider_id: parse_msg_id(&body),
+        })
     }
 }
 
@@ -135,7 +137,10 @@ impl crate::notify::Service for Service {
 
 /// HTTP Basic 鉴权头值:`Basic base64(app_key:master_secret)`。
 pub fn basic_auth(app_key: &str, master_secret: &str) -> String {
-    format!("Basic {}", base64_encode(format!("{app_key}:{master_secret}").as_bytes()))
+    format!(
+        "Basic {}",
+        base64_encode(format!("{app_key}:{master_secret}").as_bytes())
+    )
 }
 
 /// 构造 v3/push payload,可独立测试的纯函数:
@@ -209,7 +214,10 @@ pub fn parse_error(status: u16, body: &str) -> NotifyError {
     } else {
         &answer.error.message
     };
-    NotifyError::Delivery(format!("peer answered error code={}: {message}", answer.error.code))
+    NotifyError::Delivery(format!(
+        "peer answered error code={}: {message}",
+        answer.error.code
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +312,10 @@ mod tests {
             "单播 audience"
         );
         let notification = &payload["notification"];
-        assert_eq!(notification["alert"], "您的验证码是 123456", "顶层 alert 是正文");
+        assert_eq!(
+            notification["alert"], "您的验证码是 123456",
+            "顶层 alert 是正文"
+        );
         assert_eq!(
             notification["android"]["title"], "重置验证码",
             "安卓有独立通知栏标题位"
@@ -336,13 +347,19 @@ mod tests {
         .send(&Message::new("r", "t").with_content("c"))
         .unwrap_err();
         assert!(err.is_not_configured(), "{err}");
-        assert!(err.to_string().contains("app_key/master_secret required"), "{err}");
+        assert!(
+            err.to_string().contains("app_key/master_secret required"),
+            "{err}"
+        );
 
         let err = Service::new(full_cfg())
             .send(&Message::new("", "t").with_content("c"))
             .unwrap_err();
         assert!(err.is_not_configured(), "{err}");
-        assert!(err.to_string().contains("registration_id is empty"), "{err}");
+        assert!(
+            err.to_string().contains("registration_id is empty"),
+            "{err}"
+        );
     }
 
     // SSRF 预检:环回目标在拨号之前归 BlockedTarget。
@@ -362,7 +379,10 @@ mod tests {
     // basic_auth 纯函数钉值。
     #[test]
     fn test_basic_auth() {
-        assert_eq!(basic_auth("key-1", "secret-1"), "Basic a2V5LTE6c2VjcmV0LTE=");
+        assert_eq!(
+            basic_auth("key-1", "secret-1"),
+            "Basic a2V5LTE6c2VjcmV0LTE="
+        );
         assert_eq!(basic_auth("a", "b"), "Basic YTpi");
     }
 
@@ -374,14 +394,20 @@ mod tests {
             400,
             r#"{"error":{"code":1011,"message":"cannot find user by this audience","request_id":"req-1"}}"#,
         );
-        assert!(err.is_invalid_token(), "1011 = registration_id 失效,得到 {err}");
+        assert!(
+            err.is_invalid_token(),
+            "1011 = registration_id 失效,得到 {err}"
+        );
         assert!(err.to_string().contains("1011"), "{err}");
     }
 
     // 对齐上游 TestSendPeerError:其余厂商码按投递失败带出,不是令牌失效。
     #[test]
     fn test_parse_error_delivery() {
-        let err = parse_error(401, r#"{"error":{"code":1003,"message":"appkey not exist"}}"#);
+        let err = parse_error(
+            401,
+            r#"{"error":{"code":1003,"message":"appkey not exist"}}"#,
+        );
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(!err.is_invalid_token(), "{err}");
         assert!(err.to_string().contains("1003"), "{err}");
@@ -407,7 +433,10 @@ mod tests {
     // msg_id 解析:进回执;缺失/为 0 留空。
     #[test]
     fn test_parse_msg_id() {
-        assert_eq!(parse_msg_id(r#"{"sendno":"0","msg_id":1828256768}"#), "1828256768");
+        assert_eq!(
+            parse_msg_id(r#"{"sendno":"0","msg_id":1828256768}"#),
+            "1828256768"
+        );
         assert_eq!(parse_msg_id(r#"{"sendno":"0"}"#), "");
         assert_eq!(parse_msg_id("not json"), "");
     }

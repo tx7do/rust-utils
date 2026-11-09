@@ -36,7 +36,11 @@ impl Xiaomi {
         } else {
             cfg.send_url.clone()
         };
-        Xiaomi { agent: crate::notify::new_client(allow_private), send_url, cfg }
+        Xiaomi {
+            agent: crate::notify::new_client(allow_private),
+            send_url,
+            cfg,
+        }
     }
 }
 
@@ -63,7 +67,10 @@ impl Service for Xiaomi {
         let (status, body) = super::post(
             &self.agent,
             &self.send_url,
-            &[("Authorization", auth.as_str()), ("Content-Type", "application/x-www-form-urlencoded")],
+            &[
+                ("Authorization", auth.as_str()),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ],
             &form,
         )?;
         parse_answer(status, &body)?;
@@ -101,13 +108,19 @@ pub fn parse_answer(status: u16, body: &str) -> Result<(), NotifyError> {
         code: i64,
     }
     let answer: Answer = serde_json::from_str(body).map_err(|_| {
-        NotifyError::Delivery(format!("xiaomi answer is not JSON: {}", super::err_snippet(body)))
+        NotifyError::Delivery(format!(
+            "xiaomi answer is not JSON: {}",
+            super::err_snippet(body)
+        ))
     })?;
     if (200..300).contains(&status) && answer.code == 0 {
         return Ok(());
     }
     if INVALID_CODES.contains(&answer.code) {
-        return Err(NotifyError::InvalidToken(format!("invalid regid (code {})", answer.code)));
+        return Err(NotifyError::InvalidToken(format!(
+            "invalid regid (code {})",
+            answer.code
+        )));
     }
     Err(NotifyError::Delivery(format!(
         "xiaomi push failed: http {status} code {}: {}",
@@ -136,7 +149,10 @@ mod tests {
             })
             .collect();
         let get = |key: &str| -> String {
-            let idx = pairs.iter().position(|(k, _)| k == key).expect("键必在表单中");
+            let idx = pairs
+                .iter()
+                .position(|(k, _)| k == key)
+                .expect("键必在表单中");
             let raw = pairs[idx].1.as_bytes();
             // 全量 %XX 解码(QueryEscape 语义:空格编码为 +)。
             let mut out = Vec::with_capacity(raw.len());
@@ -160,7 +176,11 @@ mod tests {
         assert_eq!(get("title"), "重置验证码");
         assert_eq!(get("description"), "您的验证码是 123456");
         assert_eq!(get("pass_through"), "0", "通知栏形态,非透传");
-        assert_eq!(get("extra.uri"), "app://chat/42", "Params 以 extra.键 表单键透传,点击深链靠它");
+        assert_eq!(
+            get("extra.uri"),
+            "app://chat/42",
+            "Params 以 extra.键 表单键透传,点击深链靠它"
+        );
     }
 
     /// 对齐上游 TestXiaomiInvalidRegId:20201/20202 = regId 失效。
@@ -169,7 +189,10 @@ mod tests {
         for code in [20_201_i64, 20_202] {
             let body = format!(r#"{{"result":"fail","code":{code}}}"#);
             let err = parse_answer(200, &body).unwrap_err();
-            assert!(err.is_invalid_token(), "code {code} = regId 失效,得到 {err}");
+            assert!(
+                err.is_invalid_token(),
+                "code {code} = regId 失效,得到 {err}"
+            );
             assert!(err.to_string().contains(&code.to_string()));
         }
     }
@@ -177,13 +200,20 @@ mod tests {
     /// 对齐上游 TestXiaomiPeerError:非失效码是投递失败,文案带厂商码。
     #[test]
     fn test_peer_error() {
-        let err = parse_answer(200, r#"{"result":"fail","code":1001,"reason":"quota"}"#).unwrap_err();
+        let err =
+            parse_answer(200, r#"{"result":"fail","code":1001,"reason":"quota"}"#).unwrap_err();
         assert!(!err.is_invalid_token());
         assert!(matches!(err, NotifyError::Delivery(_)));
         assert!(err.to_string().contains("1001"));
         // HTTP 层失败 / 非JSON
-        assert!(matches!(parse_answer(500, "boom").unwrap_err(), NotifyError::Delivery(_)));
-        assert!(matches!(parse_answer(200, "<html/>").unwrap_err(), NotifyError::Delivery(_)));
+        assert!(matches!(
+            parse_answer(500, "boom").unwrap_err(),
+            NotifyError::Delivery(_)
+        ));
+        assert!(matches!(
+            parse_answer(200, "<html/>").unwrap_err(),
+            NotifyError::Delivery(_)
+        ));
     }
 
     /// 成功路径:2xx 且 code==0。
@@ -200,7 +230,13 @@ mod tests {
         assert!(err.is_not_configured());
         assert!(err.to_string().contains("app_secret"), "{err}");
 
-        let svc = Xiaomi::new(false, XiaomiConfig { app_secret: "s".into(), ..Default::default() });
+        let svc = Xiaomi::new(
+            false,
+            XiaomiConfig {
+                app_secret: "s".into(),
+                ..Default::default()
+            },
+        );
         let err = svc.send(&Message::new("", "t")).unwrap_err();
         assert!(err.to_string().contains("regId is empty"), "{err}");
         assert_eq!(Service::name(&svc), "xiaomi");
@@ -209,6 +245,9 @@ mod tests {
     /// 官方 regId 单播端点钉死(对齐上游 XiaomiSendURL)。
     #[test]
     fn test_xiaomi_send_url_constant() {
-        assert_eq!(XIAOMI_SEND_URL, "https://api.xmpush.xiaomi.com/v2/message/regid");
+        assert_eq!(
+            XIAOMI_SEND_URL,
+            "https://api.xmpush.xiaomi.com/v2/message/regid"
+        );
     }
 }

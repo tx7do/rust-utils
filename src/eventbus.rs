@@ -185,7 +185,11 @@ static EVENT_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 /// 生成事件 ID:`UTC 时间戳(YYYYMMDDhhmmss.ffffff) + 8 位随机后缀`
 /// (上游 `generateEventID`;本地时间改为 UTC,见模块头第 4 条)。
 fn generate_event_id() -> String {
-    format!("{}{}", format_timestamp(SystemTime::now()), random_string(8))
+    format!(
+        "{}{}",
+        format_timestamp(SystemTime::now()),
+        random_string(8)
+    )
 }
 
 /// splitmix64:把 64 位状态均匀打散(非加密,仅供事件 ID 去重使用)。
@@ -532,9 +536,7 @@ impl EventBus for DefaultEventBus {
 
         // 与上游一致:重新拿写锁,把该主题的 once 订阅整组删除。
         if !once.is_empty() {
-            self.write_state()
-                .once_handlers
-                .remove(&event.event_type);
+            self.write_state().once_handlers.remove(&event.event_type);
         }
         Ok(())
     }
@@ -1066,7 +1068,11 @@ mod tests {
         });
         let err = f.handle(&Event::new("adapted", None)).unwrap_err();
         assert_eq!(err, "boom", "返回值必须原样透传");
-        assert_eq!(called.load(Ordering::Relaxed), 1, "适配器必须转发到内层函数");
+        assert_eq!(
+            called.load(Ordering::Relaxed),
+            1,
+            "适配器必须转发到内层函数"
+        );
     }
 
     #[test]
@@ -1138,7 +1144,11 @@ mod tests {
         };
         let passing = FilterHandler::new(Arc::new(|_: &Event| true), inner_pass);
         passing.handle(&Event::new("pass", None)).unwrap();
-        assert_eq!(invoked.load(Ordering::Relaxed), 1, "谓词为真时内层必须被调用");
+        assert_eq!(
+            invoked.load(Ordering::Relaxed),
+            1,
+            "谓词为真时内层必须被调用"
+        );
 
         let inner_block = {
             let invoked = Arc::clone(&invoked);
@@ -1151,7 +1161,11 @@ mod tests {
         blocking
             .handle(&Event::new("blocked", None))
             .expect("谓词为假时必须静默返回成功");
-        assert_eq!(invoked.load(Ordering::Relaxed), 1, "谓词为假时内层不得被调用");
+        assert_eq!(
+            invoked.load(Ordering::Relaxed),
+            1,
+            "谓词为假时内层不得被调用"
+        );
     }
 
     // ------------------------------ 总线 ------------------------------
@@ -1201,9 +1215,10 @@ mod tests {
     #[test]
     fn test_publish_handler_error_does_not_fail_publish() {
         let bus = new_bus();
-        bus.subscribe("flaky", Arc::new(|_: &Event| -> Result<(), String> {
-            Err("flaky failure".to_string())
-        }))
+        bus.subscribe(
+            "flaky",
+            Arc::new(|_: &Event| -> Result<(), String> { Err("flaky failure".to_string()) }),
+        )
         .unwrap();
         let (tx, rx) = mpsc::channel();
         bus.subscribe("flaky", channel_handler(tx)).unwrap();
@@ -1264,7 +1279,8 @@ mod tests {
     fn test_subscribe_async_async_delivery() {
         let bus = new_bus();
         let (tx, rx) = mpsc::channel();
-        bus.subscribe_async("async.topic", channel_handler(tx)).unwrap();
+        bus.subscribe_async("async.topic", channel_handler(tx))
+            .unwrap();
         assert_eq!(bus.subscriber_count("async.topic"), 1);
 
         bus.publish(&Event::new("async.topic", None)).unwrap();
@@ -1276,7 +1292,8 @@ mod tests {
     fn test_subscribe_once_fires_once_and_auto_removed() {
         let bus = new_bus();
         let (tx, rx) = mpsc::channel();
-        bus.subscribe_once("once.topic", channel_handler(tx)).unwrap();
+        bus.subscribe_once("once.topic", channel_handler(tx))
+            .unwrap();
         assert_eq!(
             bus.subscriber_count("once.topic"),
             1,
@@ -1320,10 +1337,14 @@ mod tests {
     fn test_subscribe_once_cannot_be_unsubscribed() {
         let bus = new_bus();
         let handler: SharedHandler = Arc::new(|_: &Event| -> Result<(), String> { Ok(()) });
-        bus.subscribe_once("once.forever", Arc::clone(&handler)).unwrap();
+        bus.subscribe_once("once.forever", Arc::clone(&handler))
+            .unwrap();
 
         let err = bus.unsubscribe("once.forever", &handler).unwrap_err();
-        assert!(err.contains("handler not found"), "退订不得移除单次订阅: {err}");
+        assert!(
+            err.contains("handler not found"),
+            "退订不得移除单次订阅: {err}"
+        );
         assert_eq!(bus.subscriber_count("once.forever"), 1);
         bus.close().unwrap();
     }
@@ -1359,8 +1380,10 @@ mod tests {
     fn test_get_event_types_unions_regular_and_once() {
         let bus = new_bus();
         let handler: SharedHandler = Arc::new(|_: &Event| -> Result<(), String> { Ok(()) });
-        bus.subscribe("regular.topic", Arc::clone(&handler)).unwrap();
-        bus.subscribe_once("once.topic", Arc::clone(&handler)).unwrap();
+        bus.subscribe("regular.topic", Arc::clone(&handler))
+            .unwrap();
+        bus.subscribe_once("once.topic", Arc::clone(&handler))
+            .unwrap();
 
         assert_eq!(
             bus.event_types(),
@@ -1387,7 +1410,8 @@ mod tests {
         let bus = new_bus();
         let handler: SharedHandler = Arc::new(|_: &Event| -> Result<(), String> { Ok(()) });
         bus.subscribe("close.me", Arc::clone(&handler)).unwrap();
-        bus.subscribe_once("close.me", Arc::clone(&handler)).unwrap();
+        bus.subscribe_once("close.me", Arc::clone(&handler))
+            .unwrap();
         assert_eq!(bus.subscriber_count("close.me"), 2);
 
         bus.close().unwrap();
@@ -1396,12 +1420,20 @@ mod tests {
         assert!(bus.event_types().is_empty());
 
         let err = bus.subscribe("close.me", Arc::clone(&handler)).unwrap_err();
-        assert!(err.contains("event bus is closed"), "关闭后订阅必须被拒绝: {err}");
-        let err = bus.subscribe_once("close.me", Arc::clone(&handler)).unwrap_err();
+        assert!(
+            err.contains("event bus is closed"),
+            "关闭后订阅必须被拒绝: {err}"
+        );
+        let err = bus
+            .subscribe_once("close.me", Arc::clone(&handler))
+            .unwrap_err();
         assert!(err.contains("event bus is closed"));
 
         let err = bus.publish(&Event::new("close.me", None)).unwrap_err();
-        assert!(err.contains("event bus is closed"), "关闭后发布必须被拒绝: {err}");
+        assert!(
+            err.contains("event bus is closed"),
+            "关闭后发布必须被拒绝: {err}"
+        );
 
         let err = bus.close().unwrap_err();
         assert!(err.contains("already closed"), "重复关闭必须报错: {err}");
@@ -1420,14 +1452,21 @@ mod tests {
         let failing = mw(Arc::new(|_: &Event| -> Result<(), String> {
             Err("bad".to_string())
         }));
-        assert_eq!(failing.handle(&ev).unwrap_err(), "bad", "失败路径必须原样透传错误");
+        assert_eq!(
+            failing.handle(&ev).unwrap_err(),
+            "bad",
+            "失败路径必须原样透传错误"
+        );
 
         let logs = sink.lock().unwrap();
         assert!(
-            logs.iter().any(|l| l.contains("Handling event: type=log.me")),
+            logs.iter()
+                .any(|l| l.contains("Handling event: type=log.me")),
             "处理前必须发日志: {logs:?}"
         );
-        assert!(logs.iter().any(|l| l.contains("Successfully handled event")));
+        assert!(logs
+            .iter()
+            .any(|l| l.contains("Successfully handled event")));
         assert!(logs.iter().any(|l| l.contains("Error handling event")));
     }
 
@@ -1450,7 +1489,10 @@ mod tests {
             .to_string(),
             "panic 必须转为可识别的错误返回"
         );
-        assert!(err.starts_with("panic in event handler"), "错误消息前缀与上游一致");
+        assert!(
+            err.starts_with("panic in event handler"),
+            "错误消息前缀与上游一致"
+        );
 
         let calm = mw(Arc::new(|_: &Event| -> Result<(), String> {
             Err("pass-through".to_string())
@@ -1504,7 +1546,10 @@ mod tests {
             }
             .to_string()
         );
-        assert!(err.starts_with("event handling timeout"), "错误消息前缀与上游一致");
+        assert!(
+            err.starts_with("event handling timeout"),
+            "错误消息前缀与上游一致"
+        );
     }
 
     #[test]
@@ -1524,7 +1569,9 @@ mod tests {
             Err("always fails".to_string())
         }));
 
-        let err = handler.handle(&Event::new("always.fails", None)).unwrap_err();
+        let err = handler
+            .handle(&Event::new("always.fails", None))
+            .unwrap_err();
         assert_eq!(err, "always fails", "重试耗尽后必须返回最后的错误");
         assert_eq!(
             attempts.load(Ordering::Relaxed),
@@ -1550,7 +1597,11 @@ mod tests {
         handler
             .handle(&Event::new("succeeds.second", None))
             .expect("第二次尝试成功必须返回成功");
-        assert_eq!(attempts.load(Ordering::Relaxed), 2, "第二次成功后必须停止重试");
+        assert_eq!(
+            attempts.load(Ordering::Relaxed),
+            2,
+            "第二次成功后必须停止重试"
+        );
     }
 
     #[test]
@@ -1575,12 +1626,17 @@ mod tests {
     fn test_chain_composes_in_order() {
         // 首参数最外层:Recovery 在最外层时必须兜住内层 panic;
         // 调换顺序则 panic 会穿透到调用方(上游 TestChain_ComposesInOrder)。
-        let composed = chain(vec![recovery_middleware(), logging_middleware(noop_logger())]);
+        let composed = chain(vec![
+            recovery_middleware(),
+            logging_middleware(noop_logger()),
+        ]);
         let wrapped = composed(Arc::new(|_: &Event| -> Result<(), String> {
             panic!("inner boom")
         }));
 
-        let err = wrapped.handle(&Event::new("chain.panic", None)).unwrap_err();
+        let err = wrapped
+            .handle(&Event::new("chain.panic", None))
+            .unwrap_err();
         assert_eq!(
             err,
             MiddlewareError::Panic {
@@ -1597,7 +1653,10 @@ mod tests {
     fn test_manager_global_bus_aliases() {
         let m = Manager::new();
         let global = m.global();
-        assert!(Arc::ptr_eq(&m.get_bus(""), &global), "空名必须是全局总线的别名");
+        assert!(
+            Arc::ptr_eq(&m.get_bus(""), &global),
+            "空名必须是全局总线的别名"
+        );
         assert!(
             Arc::ptr_eq(&m.get_bus("global"), &global),
             "\"global\" 必须是全局总线的别名"
@@ -1611,7 +1670,10 @@ mod tests {
         let first = m.get_bus("metrics");
         let second = m.get_bus("metrics");
         assert!(Arc::ptr_eq(&first, &second), "同名总线必须缓存复用同一实例");
-        assert!(!Arc::ptr_eq(&first, &m.global()), "具名总线不得与全局总线混同");
+        assert!(
+            !Arc::ptr_eq(&first, &m.global()),
+            "具名总线不得与全局总线混同"
+        );
 
         let stats = m.get_stats();
         assert_eq!(stats.total_buses, 1, "仅应创建一个具名总线");
@@ -1622,7 +1684,8 @@ mod tests {
     fn test_manager_subscribe_publish_round_trip_on_named_bus() {
         let m = Manager::new();
         let (tx, rx) = mpsc::channel();
-        m.subscribe("jobs", "job.done", channel_handler(tx)).unwrap();
+        m.subscribe("jobs", "job.done", channel_handler(tx))
+            .unwrap();
 
         m.publish("jobs", &Event::new("job.done", None)).unwrap();
         assert_eq!(wait_event(&rx).event_type, "job.done");
@@ -1634,8 +1697,10 @@ mod tests {
         let m = Manager::new();
         let (alias_tx, alias_rx) = mpsc::channel();
         let (global_tx, global_rx) = mpsc::channel();
-        m.subscribe("", "sys.echo", channel_handler(alias_tx)).unwrap();
-        m.subscribe_global("sys.echo", channel_handler(global_tx)).unwrap();
+        m.subscribe("", "sys.echo", channel_handler(alias_tx))
+            .unwrap();
+        m.subscribe_global("sys.echo", channel_handler(global_tx))
+            .unwrap();
 
         m.publish_global(&Event::new("sys.echo", None)).unwrap();
         m.publish("", &Event::new("sys.echo", None)).unwrap();
@@ -1659,7 +1724,8 @@ mod tests {
         let handler: SharedHandler = Arc::new(|_: &Event| -> Result<(), String> { Ok(()) });
         m.subscribe("telemetry", "telemetry.beat", Arc::clone(&handler))
             .unwrap();
-        m.subscribe_global("global.beat", Arc::clone(&handler)).unwrap();
+        m.subscribe_global("global.beat", Arc::clone(&handler))
+            .unwrap();
 
         let stats = m.get_stats();
         assert_eq!(stats.total_buses, 1);

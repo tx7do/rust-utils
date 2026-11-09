@@ -13,7 +13,8 @@ use std::io::Read;
 use serde_json::Value;
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// Pushover 官方 API 域。
@@ -98,14 +99,18 @@ impl Service {
             method: "POST",
             url: format!("{}/1/messages.json", self.cfg.api_base),
             body: form_encode(&pairs),
-            headers: vec![("Content-Type", "application/x-www-form-urlencoded".to_string())],
+            headers: vec![(
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_string(),
+            )],
         })
     }
 
     /// 解析 2xx 应答:status==1 才是发出去了;失败时 errors 数组点名原因。
     fn parse_response(&self, body: &str) -> Result<Receipt, NotifyError> {
-        let answer: Value = serde_json::from_str(body)
-            .map_err(|_| NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body))))?;
+        let answer: Value = serde_json::from_str(body).map_err(|_| {
+            NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
+        })?;
         let status = answer.get("status").and_then(Value::as_i64).unwrap_or(0);
         if status != 1 {
             let errors: Vec<String> = answer
@@ -118,8 +123,14 @@ impl Service {
                         .collect()
                 })
                 .unwrap_or_default();
-            let joined = if errors.is_empty() { "no message".to_string() } else { errors.join("; ") };
-            return Err(NotifyError::Delivery(format!("peer answered status=0: {joined}")));
+            let joined = if errors.is_empty() {
+                "no message".to_string()
+            } else {
+                errors.join("; ")
+            };
+            return Err(NotifyError::Delivery(format!(
+                "peer answered status=0: {joined}"
+            )));
         }
         let mut receipt = Receipt::default();
         if let Some(request) = answer.get("request").and_then(Value::as_str) {
@@ -147,7 +158,9 @@ impl NotifyService for Service {
     /// 给 Target(Pushover 用户 key)推一条通知。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("pushover user key is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "pushover user key is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -200,7 +213,9 @@ fn query_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => {
                 out.push('%');
@@ -234,7 +249,11 @@ mod tests {
     fn service() -> Service {
         Service::new(
             true,
-            Config { ref_: "7".into(), app_token: "app-token".into(), api_base: "https://po.example".into() },
+            Config {
+                ref_: "7".into(),
+                app_token: "app-token".into(),
+                api_base: "https://po.example".into(),
+            },
         )
     }
 
@@ -243,11 +262,15 @@ mod tests {
         // 缺 app_token 在拨号之前就该拦下。
         let svc = Service::new(true, Config::default());
         assert_eq!(svc.name(), "pushover");
-        let err = svc.build_request(&Message::new("user-key", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("user-key", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
 
         // user key 为空同样在联系对端之前拦下。
-        let err = service().send(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = service()
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -266,15 +289,26 @@ mod tests {
 
         assert!(out.body.contains("token=app-token"));
         assert!(out.body.contains("user=user-key-30chars"));
-        assert!(out.body.contains("title=%E9%87%8D%E7%BD%AE%E9%AA%8C%E8%AF%81%E7%A0%81"));
+        assert!(out
+            .body
+            .contains("title=%E9%87%8D%E7%BD%AE%E9%AA%8C%E8%AF%81%E7%A0%81"));
         assert!(out.body.contains("priority=2"), "Params 原生字段直传表单");
         assert!(out.body.contains("sound=siren"));
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { app_token: "t".into(), api_base: "http://127.0.0.1:1".into(), ..Config::default() });
-        let err = svc.send(&Message::new("user", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                app_token: "t".into(),
+                api_base: "http://127.0.0.1:1".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("user", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
@@ -283,8 +317,13 @@ mod tests {
         let svc = service();
 
         // 成功:request ID 进回执。
-        let receipt = svc.parse_response(r#"{"status":1,"request":"e4e3a4"}"#).unwrap();
-        assert_eq!(receipt.provider_id, "e4e3a4", "Pushover 的 request ID 要进回执");
+        let receipt = svc
+            .parse_response(r#"{"status":1,"request":"e4e3a4"}"#)
+            .unwrap();
+        assert_eq!(
+            receipt.provider_id, "e4e3a4",
+            "Pushover 的 request ID 要进回执"
+        );
 
         // status=0:HTTP 200 也算失败,errors 数组点名原因。
         let err = svc
@@ -293,7 +332,9 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.to_string().contains("status=0"), "{err}");
-        assert!(err.to_string().contains("user identifier is not a valid user"));
+        assert!(err
+            .to_string()
+            .contains("user identifier is not a valid user"));
         assert!(!err.is_not_configured(), "拨过号被拒 = 投递失败");
 
         // 缺 errors 兜底"no message"。

@@ -555,8 +555,8 @@ impl Encryptor {
         let Some(encoded) = ciphertext.strip_prefix(ENCRYPTED_PREFIX) else {
             return Ok(ciphertext.to_string());
         };
-        let data = from_base64(encoded)
-            .map_err(|_| "invalid ciphertext: bad base64".to_string())?;
+        let data =
+            from_base64(encoded).map_err(|_| "invalid ciphertext: bad base64".to_string())?;
         if data.len() < 12 {
             return Err("invalid ciphertext: too short".to_string());
         }
@@ -691,8 +691,7 @@ pub fn decrypt_payload(
         Some(serde_json::Value::String(s)) => s.clone(),
         _ => return Err("encrypted config not found or invalid type".to_string()),
     };
-    let decrypted =
-        decrypt_if_needed(&encrypted).map_err(|e| format!("decrypt payload: {e}"))?;
+    let decrypted = decrypt_if_needed(&encrypted).map_err(|e| format!("decrypt payload: {e}"))?;
     serde_json::from_str(&decrypted).map_err(|e| format!("unmarshal decrypted payload: {e}"))
 }
 
@@ -737,7 +736,9 @@ mod tests {
         assert_eq!(enc.decrypt("plain-text").unwrap(), "plain-text");
         assert!(!is_encrypted("plain-text"));
         // 带前缀但内容损坏 → 报错
-        assert!(enc.decrypt(&format!("{}{}", ENCRYPTED_PREFIX, "!!!")).is_err());
+        assert!(enc
+            .decrypt(&format!("{}{}", ENCRYPTED_PREFIX, "!!!"))
+            .is_err());
         // 随机 nonce:同一明文两次密文不同
         assert_ne!(enc.encrypt("x").unwrap(), enc.encrypt("x").unwrap());
     }
@@ -776,7 +777,10 @@ mod tests {
         let sealed = encrypt_payload(payload.clone(), &["task_id"]).unwrap();
         assert!(has_encrypted_payload(&sealed));
         let plain_json = serde_json::to_string(&payload).unwrap();
-        assert_ne!(sealed.get("_encrypted_config").unwrap(), &serde_json::json!(plain_json));
+        assert_ne!(
+            sealed.get("_encrypted_config").unwrap(),
+            &serde_json::json!(plain_json)
+        );
         let back = decrypt_payload(sealed).unwrap();
         assert_eq!(back, payload);
 
@@ -956,5 +960,113 @@ mod tests {
             cipher.encrypt_with_nonce(plain, [1u8; 12]).unwrap(),
             cipher.encrypt_with_nonce(plain, [2u8; 12]).unwrap()
         );
+    }
+}
+
+// —— 口令传输混合信封（P1-12，上游 go-utils/crypto EnvelopeCodec 同构）——
+//
+// 前端以随机 AES-256-GCM 会话密钥加密口令，再用 RSA-2048 OAEP(SHA-256) 包裹
+// 会话密钥，信封格式：
+//
+//     "rsa-v1:<base64(wrappedKey)>:<base64(nonce)>:<base64(cipher)>"
+//
+// 公钥静态内置前端（公开值不降低安全性，无分发/替换通道），私钥仅服务端持有；
+// 部署契约（私钥装载/env 覆盖/dev 默认对、旧形态过渡兼容的统一分发入口）
+// 归应用侧——本模块只锁格式本体。格式由裸原语测试锁定。
+
+use base64::Engine as _;
+
+/// 信封格式版本前缀。
+pub const ENVELOPE_PREFIX: &str = "rsa-v1:";
+
+/// 口令传输混合信封编解码。
+pub struct PasswordEnvelope;
+
+impl PasswordEnvelope {
+    /// 信封加密（服务端参考实现/单测/运维工具用；前端在 WebCrypto 里独立
+    /// 实现同格式：RSA-OAEP(SHA-256) 包裹 AES-256-GCM 密钥）。加密走密钥对的
+    /// 公钥半。
+    pub fn encrypt(key: &RsaCipher, plain: &str) -> Result<String, String> {
+        let mut session = [0u8; 32];
+        let mut nonce = [0u8; 12];
+        getrandom::fill(&mut session).map_err(|e| e.to_string())?;
+        getrandom::fill(&mut nonce).map_err(|e| e.to_string())?;
+        let gcm = AesGcmCipher::new(session.to_vec())?;
+        let cipher = gcm.encrypt_with_nonce(plain.as_bytes(), nonce)?;
+        let wrapped = key
+            .encrypt(&session)
+            .map_err(|e| format!("envelope wrap: {e}"))?;
+        Ok(format!(
+            "{ENVELOPE_PREFIX}{}:{}:{}",
+            base64::engine::general_purpose::STANDARD.encode(&wrapped),
+            base64::engine::general_purpose::STANDARD.encode(nonce),
+            base64::engine::general_purpose::STANDARD.encode(&cipher),
+        ))
+    }
+
+    /// 信封解密：拆三段 base64，OAEP 解包裹会话密钥（32 字节硬校验）、
+    /// AES-256-GCM 还原口令。格式/解密失败返回 Err——调用方以 400 语义透传。
+    pub fn decrypt(key: &RsaCipher, envelope: &str) -> Result<String, String> {
+        let rest = envelope
+            .strip_prefix(ENVELOPE_PREFIX)
+            .ok_or("passwordcrypto: malformed envelope (missing rsa-v1 prefix)")?;
+        let parts: Vec<&str> = rest.split(':').collect();
+        let [wrapped_b64, nonce_b64, cipher_b64] = parts.as_slice() else {
+            return Err("passwordcrypto: malformed envelope".into());
+        };
+        let wrapped = base64::engine::general_purpose::STANDARD
+            .decode(wrapped_b64)
+            .map_err(|_| "passwordcrypto: invalid envelope base64")?;
+        let nonce = base64::engine::general_purpose::STANDARD
+            .decode(nonce_b64)
+            .map_err(|_| "passwordcrypto: invalid envelope base64")?;
+        let cipher = base64::engine::general_purpose::STANDARD
+            .decode(cipher_b64)
+            .map_err(|_| "passwordcrypto: invalid envelope base64")?;
+
+        let session = key
+            .decrypt(&wrapped)
+            .map_err(|_| "passwordcrypto: envelope unwrap".to_string())?;
+        if session.len() != 32 {
+            return Err("passwordcrypto: session key size".into());
+        }
+        if nonce.len() != 12 {
+            return Err("passwordcrypto: nonce size".into());
+        }
+        let gcm = AesGcmCipher::new(session)?;
+        let plain = gcm
+            .decrypt_with_nonce(&cipher, nonce.try_into().expect("12 bytes checked"))
+            .map_err(|_| "passwordcrypto: envelope decrypt".to_string())?;
+        String::from_utf8(plain).map_err(|_| "passwordcrypto: envelope utf8".into())
+    }
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::*;
+
+    /// 信封往返：公钥加密 → 私钥解密还原明文（含 CJK 与单字符边界）。
+    #[test]
+    fn envelope_roundtrip() {
+        let key = RsaCipher::new(2048).unwrap();
+        for pw in ["Abcd@1234", "中文密码+符号!@#", "x"] {
+            let envelope = PasswordEnvelope::encrypt(&key, pw).unwrap();
+            assert!(envelope.starts_with(ENVELOPE_PREFIX));
+            assert_eq!(PasswordEnvelope::decrypt(&key, &envelope).unwrap(), pw);
+        }
+    }
+
+    /// 垃圾输入一律报错不恐慌（格式缺段 / base64 坏 / 长度异常）。
+    #[test]
+    fn envelope_garbage_rejected() {
+        let key = RsaCipher::new(2048).unwrap();
+        for bad in [
+            "rsa-v1:!!!:???:**:",
+            "not-envelope",
+            "rsa-v1:AAAA:BBBB:CCCC",
+            "",
+        ] {
+            assert!(PasswordEnvelope::decrypt(&key, bad).is_err(), "{bad:?}");
+        }
     }
 }

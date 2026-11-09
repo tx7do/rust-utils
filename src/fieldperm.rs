@@ -342,8 +342,14 @@ fn to_snake_name(name: &str) -> String {
 mod tests {
     use super::*;
 
-/// `strip_write_fields_mask_path_filtering` 的用例五元组(名字、输入、mask、hidden、期望)。
-type MaskCase<'a> = (&'a str, &'a str, &'a [&'a str], &'a [&'a str], Option<&'a str>);
+    /// `strip_write_fields_mask_path_filtering` 的用例五元组(名字、输入、mask、hidden、期望)。
+    type MaskCase<'a> = (
+        &'a str,
+        &'a str,
+        &'a [&'a str],
+        &'a [&'a str],
+        Option<&'a str>,
+    );
     use serde_json::json;
 
     /// Plan 消息参与测试的三个字段的 json_name 键名(对齐上游 testpb.Plan):

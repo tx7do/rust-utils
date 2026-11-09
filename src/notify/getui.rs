@@ -16,10 +16,10 @@
 
 use std::sync::Mutex;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// 个推 REST API 域。
 pub const DEFAULT_API_BASE: &str = "https://restapi.getui.com";
@@ -88,7 +88,10 @@ impl Service {
     /// payload 为通知栏消息 + 防重的 request_id。
     fn build_push_request(&self, token: &str, request_id: &str, msg: &Message) -> Prepared {
         Prepared {
-            url: format!("{}/v2/{}/push/single/cid", self.cfg.api_base, self.cfg.app_id),
+            url: format!(
+                "{}/v2/{}/push/single/cid",
+                self.cfg.api_base, self.cfg.app_id
+            ),
             body: build_push_payload(&msg.title, &msg.content, request_id).to_string(),
             content_type: "application/json; charset=utf-8",
             headers: vec![("token", token.to_string())],
@@ -153,7 +156,9 @@ impl crate::notify::Service for Service {
         if msg.target.is_empty() {
             return Err(NotifyError::NotConfigured("getui cid is empty".into()));
         }
-        if self.cfg.app_id.is_empty() || self.cfg.app_key.is_empty() || self.cfg.master_secret.is_empty()
+        if self.cfg.app_id.is_empty()
+            || self.cfg.app_key.is_empty()
+            || self.cfg.master_secret.is_empty()
         {
             return Err(NotifyError::NotConfigured(
                 "getui config incomplete: app_id/app_key/master_secret required".into(),
@@ -240,7 +245,11 @@ fn parse_auth_answer(status: u16, body: &str) -> Result<(String, i64), NotifyErr
         NotifyError::Delivery(format!("auth answer is not JSON: {}", snippet(body)))
     })?;
     if answer.code != 0 || answer.data.token.is_empty() {
-        let msg = if answer.msg.is_empty() { "no message" } else { &answer.msg };
+        let msg = if answer.msg.is_empty() {
+            "no message"
+        } else {
+            &answer.msg
+        };
         return Err(NotifyError::Delivery(format!(
             "auth endpoint answered code={}: {msg}",
             answer.code
@@ -268,7 +277,11 @@ fn parse_push_answer(status: u16, body: &str) -> Result<(), NotifyError> {
         NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
     })?;
     if answer.code != 0 {
-        let msg = if answer.msg.is_empty() { "no message" } else { &answer.msg };
+        let msg = if answer.msg.is_empty() {
+            "no message"
+        } else {
+            &answer.msg
+        };
         return Err(NotifyError::Delivery(format!(
             "peer answered code={}: {msg}",
             answer.code
@@ -369,11 +382,14 @@ mod tests {
         .unwrap_err();
         assert!(err.is_not_configured(), "{err}");
         assert!(
-            err.to_string().contains("app_id/app_key/master_secret required"),
+            err.to_string()
+                .contains("app_id/app_key/master_secret required"),
             "{err}"
         );
 
-        let err = Service::new(full_cfg()).send(&Message::new("", "t").with_content("c")).unwrap_err();
+        let err = Service::new(full_cfg())
+            .send(&Message::new("", "t").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured(), "{err}");
         assert!(err.to_string().contains("cid is empty"), "{err}");
     }
@@ -400,11 +416,16 @@ mod tests {
         let sign = auth_sign("key-1", "1760000000000", "ms-1");
         let mut hasher = Sha256::new();
         hasher.update(b"key-11760000000000ms-1");
-        let want: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        let want: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
         assert_eq!(sign, want);
         assert_eq!(sign.len(), 64, "sign 是 sha256 hex");
         assert!(
-            sign.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+            sign.bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
             "sign 是小写 hex: {sign}"
         );
     }
@@ -426,7 +447,8 @@ mod tests {
     // appkey 进体、timestamp 非空、sign 是 64 位 sha256 hex。
     #[test]
     fn test_build_auth_body() {
-        let body: Value = serde_json::from_str(&build_auth_body("key-1", "1760000000000", "ms-1")).unwrap();
+        let body: Value =
+            serde_json::from_str(&build_auth_body("key-1", "1760000000000", "ms-1")).unwrap();
         assert_eq!(body["appkey"], "key-1");
         assert_eq!(body["timestamp"], "1760000000000");
         assert_eq!(
@@ -457,9 +479,16 @@ mod tests {
             "req-abc",
             &Message::new("cid-1", "重置验证码").with_content("您的验证码是 123456"),
         );
-        assert_eq!(req.url, "https://restapi.getui.com/v2/app-1/push/single/cid");
+        assert_eq!(
+            req.url,
+            "https://restapi.getui.com/v2/app-1/push/single/cid"
+        );
         assert_eq!(req.content_type, "application/json; charset=utf-8");
-        assert_eq!(req.headers[0], ("token", "gt-token".to_string()), "鉴权 token 走自定义 token 头");
+        assert_eq!(
+            req.headers[0],
+            ("token", "gt-token".to_string()),
+            "鉴权 token 走自定义 token 头"
+        );
         let payload: Value = serde_json::from_str(&req.body).unwrap();
         assert_eq!(payload["request_id"], "req-abc");
     }
@@ -469,8 +498,14 @@ mod tests {
     fn test_token_expires_at() {
         const MARGIN: i64 = 60_000;
         const FALLBACK: i64 = 3_600_000;
-        assert_eq!(token_expires_at(1_000, 1_760_000_000_000), 1_760_000_000_000 - MARGIN);
-        assert_eq!(token_expires_at(1_000_000, 1_000), 1_000_000 + FALLBACK - MARGIN);
+        assert_eq!(
+            token_expires_at(1_000, 1_760_000_000_000),
+            1_760_000_000_000 - MARGIN
+        );
+        assert_eq!(
+            token_expires_at(1_000_000, 1_000),
+            1_000_000 + FALLBACK - MARGIN
+        );
     }
 
     // rand_text:22 字符 URL-safe 字母表,两次调用不重复。
@@ -479,7 +514,8 @@ mod tests {
         let text = rand_text();
         assert_eq!(text.len(), 22, "16 字节的 RawURL base64 是 22 字符: {text}");
         assert!(
-            text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+            text.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
             "{text}"
         );
         assert_ne!(rand_text(), text, "随机源不可复现");
@@ -506,7 +542,10 @@ mod tests {
         assert!(err.to_string().contains("code=0"), "{err}");
 
         let err = parse_auth_answer(500, "boom").unwrap_err();
-        assert!(err.to_string().contains("auth endpoint answered 500"), "{err}");
+        assert!(
+            err.to_string().contains("auth endpoint answered 500"),
+            "{err}"
+        );
 
         let err = parse_auth_answer(200, "<html>gateway</html>").unwrap_err();
         assert!(err.to_string().contains("not JSON"), "{err}");

@@ -13,7 +13,8 @@ use std::io::Read;
 use serde_json::{json, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// WxPusher 官方域。
@@ -119,15 +120,18 @@ impl Service {
 
     /// 解析 2xx 应答:WxPusher 的成功码是 1000。
     fn parse_response(&self, body: &str) -> Result<Receipt, NotifyError> {
-        let answer: Value = serde_json::from_str(body)
-            .map_err(|_| NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body))))?;
+        let answer: Value = serde_json::from_str(body).map_err(|_| {
+            NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
+        })?;
         let code = answer.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 1000 {
             let mut message = answer.get("msg").and_then(Value::as_str).unwrap_or("");
             if message.is_empty() {
                 message = "no message";
             }
-            return Err(NotifyError::Delivery(format!("peer answered code={code}: {message}")));
+            return Err(NotifyError::Delivery(format!(
+                "peer answered code={code}: {message}"
+            )));
         }
 
         let mut receipt = Receipt::default();
@@ -233,7 +237,12 @@ mod tests {
     fn service() -> Service {
         Service::new(
             true,
-            Config { ref_: "7".into(), app_token: "AT_x".into(), api_base: "https://wx.example".into(), content_type: 0 },
+            Config {
+                ref_: "7".into(),
+                app_token: "AT_x".into(),
+                api_base: "https://wx.example".into(),
+                content_type: 0,
+            },
         )
     }
 
@@ -241,13 +250,17 @@ mod tests {
     fn test_missing_app_token_is_not_configured() {
         let svc = Service::new(true, Config::default());
         assert_eq!(svc.name(), "wxpusher");
-        let err = svc.build_request(&Message::new("UID_x", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("UID_x", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
     #[test]
     fn test_empty_uid_is_not_configured() {
-        let err = service().send(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = service()
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -266,7 +279,10 @@ mod tests {
         assert_eq!(payload["uids"], json!(["UID_x"]));
         assert_eq!(payload["content"], "您的验证码是 123456");
         assert_eq!(payload["contentType"], 1, "默认文本形态");
-        assert_eq!(payload["summary"], "重置验证码", "summary 是通知栏预览(Title 兜底)");
+        assert_eq!(
+            payload["summary"], "重置验证码",
+            "summary 是通知栏预览(Title 兜底)"
+        );
     }
 
     #[test]
@@ -274,7 +290,9 @@ mod tests {
         let svc = service();
         // 无 Title:取 Content 前 20 字节(ASCII 正好 20 个)。
         let out = svc
-            .build_request(&Message::new("UID_x", "").with_content("012345678901234567890123456789"))
+            .build_request(
+                &Message::new("UID_x", "").with_content("012345678901234567890123456789"),
+            )
             .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["summary"], "01234567890123456789");
@@ -284,13 +302,25 @@ mod tests {
         let msg = Message::new("UID_x", "").with_content("汉".repeat(10));
         let out = svc.build_request(&msg).unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
-        assert_eq!(payload["summary"], "汉汉汉汉汉汉", "summary 按 20 字节退字符边界截取");
+        assert_eq!(
+            payload["summary"], "汉汉汉汉汉汉",
+            "summary 按 20 字节退字符边界截取"
+        );
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { app_token: "t".into(), api_base: "http://127.0.0.1:1".into(), ..Config::default() });
-        let err = svc.send(&Message::new("UID_x", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                app_token: "t".into(),
+                api_base: "http://127.0.0.1:1".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("UID_x", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
@@ -300,7 +330,9 @@ mod tests {
 
         // 成功码是 1000 不是 0——钉住,别被顺手"统一"成 0。
         let receipt = svc
-            .parse_response(r#"{"code":1000,"msg":"处理成功","data":[{"uid":"UID_x","messageId":731}]}"#)
+            .parse_response(
+                r#"{"code":1000,"msg":"处理成功","data":[{"uid":"UID_x","messageId":731}]}"#,
+            )
             .unwrap();
         assert_eq!(receipt.provider_id, "731", "WxPusher 的 messageId 要进回执");
 
@@ -308,7 +340,9 @@ mod tests {
         let err = svc.parse_response(r#"{"code":0}"#).unwrap_err();
         assert!(err.to_string().contains("code=0"), "{err}");
 
-        let err = svc.parse_response(r#"{"code":1001,"msg":"appToken无效"}"#).unwrap_err();
+        let err = svc
+            .parse_response(r#"{"code":1001,"msg":"appToken无效"}"#)
+            .unwrap_err();
         assert!(err.to_string().contains("code=1001"), "{err}");
         assert!(!err.is_not_configured(), "拨过号被拒 = 投递失败");
 

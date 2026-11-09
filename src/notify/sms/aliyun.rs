@@ -93,8 +93,16 @@ pub(super) fn base64_encode(data: &[u8]) -> String {
             | (*chunk.get(2).unwrap_or(&0) as u32);
         out.push(ALPHABET[(n >> 18 & 0x3F) as usize] as char);
         out.push(ALPHABET[(n >> 12 & 0x3F) as usize] as char);
-        out.push(if chunk.len() > 1 { ALPHABET[(n >> 6 & 0x3F) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { ALPHABET[(n & 0x3F) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(n >> 6 & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[(n & 0x3F) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -124,8 +132,11 @@ pub fn sign_rpc(params: &[(String, String)], access_secret: &str) -> String {
         canonical.push_str(&percent_encode(value_of(k)));
     }
 
-    let string_to_sign =
-        format!("POST&{}&{}", percent_encode("/"), percent_encode(&canonical));
+    let string_to_sign = format!(
+        "POST&{}&{}",
+        percent_encode("/"),
+        percent_encode(&canonical)
+    );
     let key = format!("{access_secret}&");
     let mut mac = <HmacSha1 as Mac>::new_from_slice(key.as_bytes()).expect("hmac 接受任意长度密钥");
     mac.update(string_to_sign.as_bytes());
@@ -196,7 +207,11 @@ pub fn parse_answer(status: u16, body: &str) -> Result<String, NotifyError> {
     let answer: Answer<'_> = serde_json::from_str(body)
         .map_err(|_| NotifyError::Delivery(format!("peer answer is not JSON: {body}")))?;
     if answer.code != "OK" {
-        let message = if answer.message.is_empty() { "no message" } else { answer.message };
+        let message = if answer.message.is_empty() {
+            "no message"
+        } else {
+            answer.message
+        };
         return Err(NotifyError::Delivery(format!(
             "provider answered Code={}: {message}",
             answer.code
@@ -216,7 +231,11 @@ pub(super) fn send(
     phone: &str,
     template_params: &HashMap<String, String>,
 ) -> Result<String, NotifyError> {
-    let region = if cfg.region.is_empty() { ALIYUN_SMS_DEFAULT_REGION } else { &cfg.region };
+    let region = if cfg.region.is_empty() {
+        ALIYUN_SMS_DEFAULT_REGION
+    } else {
+        &cfg.region
+    };
     let template_param = serde_json::to_string(template_params)
         .map_err(|e| NotifyError::NotConfigured(format!("encode template param failed: {e}")))?;
     let body = build_form(
@@ -345,7 +364,10 @@ mod tests {
             "2026-10-15T06:00:00Z",
         );
         // 键按字母序出站(Go url.Values.Encode 语义)
-        let keys: Vec<&str> = body.split('&').map(|kv| kv.split('=').next().unwrap()).collect();
+        let keys: Vec<&str> = body
+            .split('&')
+            .map(|kv| kv.split('=').next().unwrap())
+            .collect();
         let mut sorted = keys.clone();
         sorted.sort_unstable();
         assert_eq!(keys, sorted, "表单键必须有序");
@@ -372,8 +394,11 @@ mod tests {
         .unwrap();
         assert_eq!(biz, "biz-9");
         // 业务失败:200 但 Code != OK
-        let err = parse_answer(200, r#"{"Code":"isv.BUSINESS_LIMIT_CONTROL","Message":"触发分钟级流控"}"#)
-            .unwrap_err();
+        let err = parse_answer(
+            200,
+            r#"{"Code":"isv.BUSINESS_LIMIT_CONTROL","Message":"触发分钟级流控"}"#,
+        )
+        .unwrap_err();
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(err.to_string().contains("isv.BUSINESS_LIMIT_CONTROL"));
         // 空 Message 兜底

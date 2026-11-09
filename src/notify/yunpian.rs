@@ -15,7 +15,7 @@
 //! 测试离线进行:请求构造与回执解析拆成纯函数断言,不真实连网。
 
 use crate::notify::sms::normalize_phone_number;
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// 云片官方 API 域。
 pub const DEFAULT_API_BASE: &str = "https://sms.yunpian.com";
@@ -64,7 +64,9 @@ impl Service {
     /// 构造请求(纯函数):手机号归一为 CN 裸号,正文整段自由文本原样出站。
     fn build_request(&self, msg: &Message) -> Result<Prepared, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("yunpian sms text is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "yunpian sms text is empty".into(),
+            ));
         }
         if self.cfg.api_key.is_empty() {
             return Err(NotifyError::NotConfigured(
@@ -106,7 +108,11 @@ impl Service {
             NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
         })?;
         if answer.code != 0 {
-            let msg = if answer.msg.is_empty() { "no message" } else { &answer.msg };
+            let msg = if answer.msg.is_empty() {
+                "no message"
+            } else {
+                &answer.msg
+            };
             return Err(NotifyError::Delivery(format!(
                 "peer answered code={}: {msg}",
                 answer.code
@@ -240,8 +246,10 @@ mod tests {
     fn test_build_request() {
         let svc = Service::new(full_cfg());
         let req = svc
-            .build_request(&Message::new("13800138000", "标题被忽略")
-                .with_content("【GoWind】您的验证码是 123456"))
+            .build_request(
+                &Message::new("13800138000", "标题被忽略")
+                    .with_content("【GoWind】您的验证码是 123456"),
+            )
             .unwrap();
         assert_eq!(req.url, "https://sms.yunpian.com/v2/sms/single_send.json");
         assert_eq!(req.content_type, "application/x-www-form-urlencoded");
@@ -265,7 +273,11 @@ mod tests {
         let req = svc
             .build_request(&Message::new("+8613800138000", "").with_content("【G】x"))
             .unwrap();
-        assert!(req.body.contains("mobile=13800138000"), "+86 前缀剥掉: {}", req.body);
+        assert!(
+            req.body.contains("mobile=13800138000"),
+            "+86 前缀剥掉: {}",
+            req.body
+        );
     }
 
     // 对齐上游 TestSendBadMobileIsConfigClass / TestSendConfigIssue:
@@ -308,7 +320,10 @@ mod tests {
     #[test]
     fn test_build_form() {
         let body = build_form("apikey-1", "13800138000", "【GoWind】您的验证码是 123456");
-        let keys: Vec<&str> = body.split('&').map(|kv| kv.split('=').next().unwrap()).collect();
+        let keys: Vec<&str> = body
+            .split('&')
+            .map(|kv| kv.split('=').next().unwrap())
+            .collect();
         assert_eq!(keys, ["apikey", "mobile", "text"], "表单键按字母序出站");
         assert!(body.contains("apikey=apikey-1"));
         assert!(body.contains("text=%E3%80%90GoWind%E3%80%91"));
@@ -328,7 +343,8 @@ mod tests {
         let provider_id = Service::parse_answer(200, r#"{"code":0,"msg":"OK"}"#).unwrap();
         assert_eq!(provider_id, "");
 
-        let err = Service::parse_answer(200, r#"{"code":-4,"msg":"apikey 不存在或被禁用"}"#).unwrap_err();
+        let err =
+            Service::parse_answer(200, r#"{"code":-4,"msg":"apikey 不存在或被禁用"}"#).unwrap_err();
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(err.to_string().contains("code=-4"), "{err}");
 
@@ -348,6 +364,9 @@ mod tests {
         assert_eq!(form_urlencode("aBc-_.~123"), "aBc-_.~123");
         assert_eq!(form_urlencode("a b"), "a+b");
         assert_eq!(form_urlencode("a&b=c"), "a%26b%3Dc");
-        assert_eq!(form_urlencode("【签名】"), "%E3%80%90%E7%AD%BE%E5%90%8D%E3%80%91");
+        assert_eq!(
+            form_urlencode("【签名】"),
+            "%E3%80%90%E7%AD%BE%E5%90%8D%E3%80%91"
+        );
     }
 }

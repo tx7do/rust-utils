@@ -2,9 +2,9 @@
 //!
 //! 测试离线进行:请求构造与回执解析拆成纯函数断言,不真实连网。
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Opsgenie 官方 API 域(欧盟租户用 [`Config::api_base`] 覆写为 api.eu.opsgenie.com)。
 pub const DEFAULT_API_BASE: &str = "https://api.opsgenie.com";
@@ -203,9 +203,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(req.url, "https://api.opsgenie.com/v2/alerts");
-        assert_eq!(req.headers[0], ("Authorization", "GenieKey gk-1".to_string()));
+        assert_eq!(
+            req.headers[0],
+            ("Authorization", "GenieKey gk-1".to_string())
+        );
         let payload: Value = serde_json::from_str(&req.body).unwrap();
-        assert_eq!(payload["message"], "磁盘告警", "message 必填位由 Title 顶上");
+        assert_eq!(
+            payload["message"], "磁盘告警",
+            "message 必填位由 Title 顶上"
+        );
         assert_eq!(
             payload["description"], "root 分区用量 92%",
             "Content 全文进 description"

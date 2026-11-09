@@ -2,9 +2,9 @@
 //!
 //! 测试离线进行:请求构造与回执解析拆成纯函数断言,不真实连网。
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Events API 官方域。
 pub const DEFAULT_API_BASE: &str = "https://events.pagerduty.com";
@@ -253,7 +253,10 @@ mod tests {
         assert_eq!(pl["summary"], "root 分区用量 92%");
         assert_eq!(pl["severity"], "error");
         assert_eq!(pl["source"], "go-wind");
-        assert_eq!(pl["custom_details"]["title"], "磁盘告警", "Title 落 custom_details");
+        assert_eq!(
+            pl["custom_details"]["title"], "磁盘告警",
+            "Title 落 custom_details"
+        );
         assert!(
             pl.get("timestamp").and_then(Value::as_str).is_some(),
             "事件要带时间戳"
@@ -283,7 +286,10 @@ mod tests {
             r#"{"status":"success","message":"Event processed","dedup_key":"disk-alert-1"}"#,
         )
         .unwrap();
-        assert_eq!(receipt.provider_id, "disk-alert-1", "确认后的 dedup key 要进回执");
+        assert_eq!(
+            receipt.provider_id, "disk-alert-1",
+            "确认后的 dedup key 要进回执"
+        );
 
         // 上游用 400 压测:对端拒收是投递失败,文案带对端说明。
         let err = Service::parse_answer(

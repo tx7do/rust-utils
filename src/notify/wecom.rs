@@ -13,9 +13,9 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// 企业微信官方 API 域。
 pub const DEFAULT_API_BASE: &str = "https://qyapi.weixin.qq.com";
@@ -115,7 +115,10 @@ impl Service {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let expires_in = answer.get("expires_in").and_then(Value::as_i64).unwrap_or(0);
+        let expires_in = answer
+            .get("expires_in")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
         if err_code != 0 || token.is_empty() {
             let err_msg = answer
                 .get("errmsg")
@@ -215,7 +218,8 @@ impl Service {
         let mut st = self.lock_token();
         st.token = token.clone();
         st.expires_at = Some(
-            Instant::now() + Duration::from_secs(ttl.saturating_sub(TOKEN_REFRESH_MARGIN.as_secs())),
+            Instant::now()
+                + Duration::from_secs(ttl.saturating_sub(TOKEN_REFRESH_MARGIN.as_secs())),
         );
         Ok(token)
     }
@@ -270,9 +274,7 @@ impl crate::notify::Service for Service {
                 "wecom touser is empty".to_string(),
             ));
         }
-        if self.cfg.corp_id.is_empty()
-            || self.cfg.corp_secret.is_empty()
-            || self.cfg.agent_id == 0
+        if self.cfg.corp_id.is_empty() || self.cfg.corp_secret.is_empty() || self.cfg.agent_id == 0
         {
             return Err(NotifyError::NotConfigured(
                 "wecom config incomplete: corp_id/corp_secret/agent_id required".to_string(),
@@ -395,7 +397,8 @@ mod tests {
             ..Config::default()
         });
         assert!(
-            req.url.ends_with("/cgi-bin/gettoken?corpid=corp%261&corpsecret=secret+1"),
+            req.url
+                .ends_with("/cgi-bin/gettoken?corpid=corp%261&corpsecret=secret+1"),
             "got: {}",
             req.url
         );
@@ -412,8 +415,9 @@ mod tests {
         assert_eq!(token, "token-1");
         assert_eq!(expires_in, 7200);
 
-        let err = Service::parse_token_answer(200, r#"{"errcode":40013,"errmsg":"invalid corpid"}"#)
-            .unwrap_err();
+        let err =
+            Service::parse_token_answer(200, r#"{"errcode":40013,"errmsg":"invalid corpid"}"#)
+                .unwrap_err();
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(err.to_string().contains("errcode=40013"));
 
@@ -460,29 +464,24 @@ mod tests {
                 .unwrap();
         assert_eq!(receipt.provider_id, "", "应用消息不回消息 ID,回执为空");
 
-        let err =
-            Service::parse_push_answer(200, r#"{"errcode":81013,"errmsg":"invalid user"}"#)
-                .unwrap_err();
+        let err = Service::parse_push_answer(200, r#"{"errcode":81013,"errmsg":"invalid user"}"#)
+            .unwrap_err();
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(err.to_string().contains("errcode=81013"));
 
         // token 失效码(40014/42001)能被识别,供强刷重试路径用。
-        let invalid = Service::parse_push_answer(
-            200,
-            r#"{"errcode":40014,"errmsg":"invalid access_token"}"#,
-        )
-        .unwrap_err();
+        let invalid =
+            Service::parse_push_answer(200, r#"{"errcode":40014,"errmsg":"invalid access_token"}"#)
+                .unwrap_err();
         assert!(Service::is_token_err(&invalid), "{invalid}");
 
-        let expired = Service::parse_push_answer(
-            200,
-            r#"{"errcode":42001,"errmsg":"access_token expired"}"#,
-        )
-        .unwrap_err();
+        let expired =
+            Service::parse_push_answer(200, r#"{"errcode":42001,"errmsg":"access_token expired"}"#)
+                .unwrap_err();
         assert!(Service::is_token_err(&expired), "{expired}");
 
-        let other = Service::parse_push_answer(200, r#"{"errcode":81013,"errmsg":"x"}"#)
-            .unwrap_err();
+        let other =
+            Service::parse_push_answer(200, r#"{"errcode":81013,"errmsg":"x"}"#).unwrap_err();
         assert!(!Service::is_token_err(&other), "业务错误不走强刷路径");
     }
 }

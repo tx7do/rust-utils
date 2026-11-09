@@ -107,8 +107,12 @@ impl Fcm {
             }
         }
 
-        let (assertion, mint_expiry) =
-            mint_fcm_jwt(&self.cfg.client_email, &self.cfg.private_key, self.token_uri(), now)?;
+        let (assertion, mint_expiry) = mint_fcm_jwt(
+            &self.cfg.client_email,
+            &self.cfg.private_key,
+            self.token_uri(),
+            now,
+        )?;
 
         // assertion 是 base64url 串,无需再编码,与上游一样整串手拼。
         let form =
@@ -135,7 +139,9 @@ impl Fcm {
         let tok: TokenResp = serde_json::from_str(&body)
             .map_err(|_| NotifyError::Delivery("fcm oauth token response is not JSON".into()))?;
         if tok.access_token.is_empty() {
-            return Err(NotifyError::Delivery("fcm oauth token empty access_token".into()));
+            return Err(NotifyError::Delivery(
+                "fcm oauth token empty access_token".into(),
+            ));
         }
 
         // 取厂商给的 expires_in 与 JWT 自身有效期的较早者。
@@ -165,7 +171,9 @@ impl Service for Fcm {
     /// Receipt.ProviderID 带回消息 name 的尾段(厂商侧消息 ID)。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("fcm device token is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "fcm device token is empty".into(),
+            ));
         }
         self.check_config()?;
 
@@ -273,7 +281,11 @@ pub fn parse_answer(status: u16, body: &str) -> Result<Option<String>, NotifyErr
         let name = serde_json::from_str::<Answer>(body)
             .map(|a| a.name)
             .unwrap_or_default();
-        return Ok(name.rsplit('/').next().filter(|s| !s.is_empty()).map(str::to_string));
+        return Ok(name
+            .rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .map(str::to_string));
     }
     if status == 404 || status == 410 {
         // 令牌已从注册表除名:调用方删行自清理,不算投递失败重试。
@@ -325,9 +337,13 @@ O5je4GHHY3J6h7rIU4EwrJFBIHkahS3qSGmg0PSijUb0HDr4SDxSr7/UVSas8734
     #[test]
     fn test_mint_fcm_jwt_claims() {
         let now = 1_760_000_000_i64;
-        let (assertion, expiry) =
-            mint_fcm_jwt("sa@proj-x.iam.gserviceaccount.com", TEST_RSA_PEM, FCM_DEFAULT_TOKEN_URI, now)
-                .expect("测试私钥应可签发");
+        let (assertion, expiry) = mint_fcm_jwt(
+            "sa@proj-x.iam.gserviceaccount.com",
+            TEST_RSA_PEM,
+            FCM_DEFAULT_TOKEN_URI,
+            now,
+        )
+        .expect("测试私钥应可签发");
 
         let parts: Vec<&str> = assertion.split('.').collect();
         assert_eq!(parts.len(), 3, "JWT 三段式");
@@ -340,7 +356,13 @@ O5je4GHHY3J6h7rIU4EwrJFBIHkahS3qSGmg0PSijUb0HDr4SDxSr7/UVSas8734
         // claims:iss/scope/aud/iat/exp
         let claims: serde_json::Value = serde_json::from_slice(&jwt_b64_decode(parts[1])).unwrap();
         assert_eq!(claims["iss"], "sa@proj-x.iam.gserviceaccount.com");
-        assert!(claims["scope"].as_str().unwrap().contains("firebase.messaging"), "{claims}");
+        assert!(
+            claims["scope"]
+                .as_str()
+                .unwrap()
+                .contains("firebase.messaging"),
+            "{claims}"
+        );
         assert_eq!(claims["aud"], FCM_DEFAULT_TOKEN_URI);
         assert_eq!(claims["iat"], now);
         assert_eq!(claims["exp"], now + 3600);
@@ -425,9 +447,18 @@ O5je4GHHY3J6h7rIU4EwrJFBIHkahS3qSGmg0PSijUb0HDr4SDxSr7/UVSas8734
     /// 拨号前的配置自检:缺项目 ID / 缺服务账号分别点名。
     #[test]
     fn test_check_config() {
-        let svc = Fcm::new(false, FcmConfig { project_id: "p".into(), ..Default::default() });
+        let svc = Fcm::new(
+            false,
+            FcmConfig {
+                project_id: "p".into(),
+                ..Default::default()
+            },
+        );
         let err = svc.check_config().unwrap_err();
-        assert!(err.to_string().contains("client_email/private_key"), "{err}");
+        assert!(
+            err.to_string().contains("client_email/private_key"),
+            "{err}"
+        );
 
         let svc = Fcm::new(false, FcmConfig::default());
         let err = svc.check_config().unwrap_err();
@@ -454,7 +485,10 @@ O5je4GHHY3J6h7rIU4EwrJFBIHkahS3qSGmg0PSijUb0HDr4SDxSr7/UVSas8734
         assert_eq!(svc.token_uri(), FCM_DEFAULT_TOKEN_URI);
         let svc = Fcm::new(
             false,
-            FcmConfig { token_uri: "http://127.0.0.1:1/token".into(), ..Default::default() },
+            FcmConfig {
+                token_uri: "http://127.0.0.1:1/token".into(),
+                ..Default::default()
+            },
         );
         assert_eq!(svc.token_uri(), "http://127.0.0.1:1/token");
         assert_eq!(Service::name(&svc), "fcm");
@@ -463,6 +497,9 @@ O5je4GHHY3J6h7rIU4EwrJFBIHkahS3qSGmg0PSijUb0HDr4SDxSr7/UVSas8734
     /// OAuth2 scope 钉死:token 换发按它申请,漂移会直接被 Google 拒。
     #[test]
     fn test_fcm_scope_constant() {
-        assert_eq!(FCM_SCOPE, "https://www.googleapis.com/auth/firebase.messaging");
+        assert_eq!(
+            FCM_SCOPE,
+            "https://www.googleapis.com/auth/firebase.messaging"
+        );
     }
 }

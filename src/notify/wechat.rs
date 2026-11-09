@@ -11,9 +11,9 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// 微信公众号官方 API 域。
 pub const DEFAULT_API_BASE: &str = "https://api.weixin.qq.com";
@@ -113,7 +113,10 @@ impl Service {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let expires_in = answer.get("expires_in").and_then(Value::as_i64).unwrap_or(0);
+        let expires_in = answer
+            .get("expires_in")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
         if err_code != 0 || token.is_empty() {
             let err_msg = answer
                 .get("errmsg")
@@ -220,7 +223,8 @@ impl Service {
         let mut st = self.lock_token();
         st.token = token.clone();
         st.expires_at = Some(
-            Instant::now() + Duration::from_secs(ttl.saturating_sub(TOKEN_REFRESH_MARGIN.as_secs())),
+            Instant::now()
+                + Duration::from_secs(ttl.saturating_sub(TOKEN_REFRESH_MARGIN.as_secs())),
         );
         Ok(token)
     }
@@ -411,7 +415,9 @@ mod tests {
             ..Config::default()
         });
         assert!(
-            req.url.ends_with("/cgi-bin/token?grant_type=client_credential&appid=appid-1&secret=secret-1"),
+            req.url.ends_with(
+                "/cgi-bin/token?grant_type=client_credential&appid=appid-1&secret=secret-1"
+            ),
             "got: {}",
             req.url
         );
@@ -420,20 +426,16 @@ mod tests {
     // token 应答解析:取 token 与有效期;token 端点报错归投递失败。
     #[test]
     fn test_parse_token_answer() {
-        let (token, expires_in) = Service::parse_token_answer(
-            200,
-            r#"{"access_token":"token-1","expires_in":7200}"#,
-        )
-        .unwrap();
+        let (token, expires_in) =
+            Service::parse_token_answer(200, r#"{"access_token":"token-1","expires_in":7200}"#)
+                .unwrap();
         assert_eq!(token, "token-1");
         assert_eq!(expires_in, 7200);
 
         // 微信对取 token 失败的答法:200 + errcode/errmsg。
-        let err = Service::parse_token_answer(
-            200,
-            r#"{"errcode":40125,"errmsg":"invalid appsecret"}"#,
-        )
-        .unwrap_err();
+        let err =
+            Service::parse_token_answer(200, r#"{"errcode":40125,"errmsg":"invalid appsecret"}"#)
+                .unwrap_err();
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(err.to_string().contains("40125"));
 
@@ -460,7 +462,11 @@ mod tests {
         assert_eq!(p["touser"], "oX-openid-1");
         assert_eq!(p["template_id"], "TMPL-1");
         let data = &p["data"];
-        assert_eq!(data["code"], json!({ "value": "123456" }), "每个参数键渲染成 {{value}} 形状");
+        assert_eq!(
+            data["code"],
+            json!({ "value": "123456" }),
+            "每个参数键渲染成 {{value}} 形状"
+        );
         assert_eq!(data["minute"], json!({ "value": "10" }));
         assert!(p.get("title").is_none(), "Title 不进模板消息");
     }
@@ -480,9 +486,12 @@ mod tests {
     // token 失效码能被 is_token_err 识别,业务错误不算。
     #[test]
     fn test_parse_push_answer_and_token_err() {
-        let receipt = Service::parse_push_answer(200, r#"{"errcode":0,"errmsg":"ok","msgid":9527}"#)
-            .unwrap();
-        assert_eq!(receipt.provider_id, "9527", "微信的 msgid 要进回执,对账全靠它");
+        let receipt =
+            Service::parse_push_answer(200, r#"{"errcode":0,"errmsg":"ok","msgid":9527}"#).unwrap();
+        assert_eq!(
+            receipt.provider_id, "9527",
+            "微信的 msgid 要进回执,对账全靠它"
+        );
 
         let receipt = Service::parse_push_answer(200, r#"{"errcode":0}"#).unwrap();
         assert_eq!(receipt.provider_id, "", "msgid 为 0 时不进回执");
@@ -497,18 +506,14 @@ mod tests {
         assert!(!Service::is_token_err(&err), "非 token 错误不许触发强刷");
         assert!(err.to_string().contains("45009"));
 
-        let invalid = Service::parse_push_answer(
-            200,
-            r#"{"errcode":40001,"errmsg":"invalid credential"}"#,
-        )
-        .unwrap_err();
+        let invalid =
+            Service::parse_push_answer(200, r#"{"errcode":40001,"errmsg":"invalid credential"}"#)
+                .unwrap_err();
         assert!(Service::is_token_err(&invalid), "{invalid}");
 
-        let expired = Service::parse_push_answer(
-            200,
-            r#"{"errcode":42001,"errmsg":"access_token expired"}"#,
-        )
-        .unwrap_err();
+        let expired =
+            Service::parse_push_answer(200, r#"{"errcode":42001,"errmsg":"access_token expired"}"#)
+                .unwrap_err();
         assert!(Service::is_token_err(&expired), "{expired}");
 
         let err = Service::parse_push_answer(500, "boom").unwrap_err();

@@ -11,7 +11,8 @@ use std::io::Read;
 use serde_json::{json, Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// Pushbullet 官方 API 域。
@@ -128,7 +129,9 @@ impl NotifyService for Service {
     /// 推一条 note。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("pushbullet message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "pushbullet message body is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -186,14 +189,20 @@ mod tests {
     fn service() -> Service {
         Service::new(
             true,
-            Config { ref_: "7".into(), api_key: "o.token-1".into(), api_base: "https://pb.example".into() },
+            Config {
+                ref_: "7".into(),
+                api_key: "o.token-1".into(),
+                api_base: "https://pb.example".into(),
+            },
         )
     }
 
     #[test]
     fn test_missing_api_key_is_not_configured() {
         let svc = Service::new(true, Config::default());
-        let err = svc.build_request(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -220,27 +229,52 @@ mod tests {
                 .map(|(_, v)| v.clone())
                 .unwrap_or_default()
         };
-        assert_eq!(header("Access-Token"), "o.token-1", "Pushbullet 的鉴权头是 Access-Token 不是 Bearer");
+        assert_eq!(
+            header("Access-Token"),
+            "o.token-1",
+            "Pushbullet 的鉴权头是 Access-Token 不是 Bearer"
+        );
 
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["type"], "note");
         assert_eq!(payload["title"], "下载完成");
         assert_eq!(payload["body"], "报告已生成");
-        assert_eq!(payload["device_iden"], "device-iden-9", "Target 作为目标设备");
+        assert_eq!(
+            payload["device_iden"], "device-iden-9",
+            "Target 作为目标设备"
+        );
     }
 
     #[test]
     fn test_without_target_pushes_all_devices() {
-        let svc = Service::new(true, Config { api_key: "k".into(), api_base: "https://pb.example".into(), ..Config::default() });
-        let out = svc.build_request(&Message::new("", "t").with_content("c")).unwrap();
+        let svc = Service::new(
+            true,
+            Config {
+                api_key: "k".into(),
+                api_base: "https://pb.example".into(),
+                ..Config::default()
+            },
+        );
+        let out = svc
+            .build_request(&Message::new("", "t").with_content("c"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert!(payload.get("device_iden").is_none(), "无 Target 推全部设备");
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { api_key: "k".into(), api_base: "http://127.0.0.1:1".into(), ..Config::default() });
-        let err = svc.send(&Message::new("", "t").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                api_key: "k".into(),
+                api_base: "http://127.0.0.1:1".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("", "t").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
@@ -250,7 +284,10 @@ mod tests {
         let receipt = svc
             .parse_response(r#"{"type":"note","iden":"ujzX123","title":"t","body":"c"}"#)
             .unwrap();
-        assert_eq!(receipt.provider_id, "ujzX123", "Pushbullet 的 iden 要进回执");
+        assert_eq!(
+            receipt.provider_id, "ujzX123",
+            "Pushbullet 的 iden 要进回执"
+        );
         assert_eq!(svc.parse_response("{}").unwrap().provider_id, "");
     }
 

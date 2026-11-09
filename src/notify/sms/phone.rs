@@ -75,7 +75,10 @@ mod tests {
         }
         // 拒绝形态:裸 5 位既不是 E.164 也不是 CN 手机 / 混入字母 / 超 20 位 / 空
         for raw in ["12345", "1380013800a", "13800138000112345678", ""] {
-            assert!(normalize_phone_number(raw).is_err(), "{raw:?} should be rejected");
+            assert!(
+                normalize_phone_number(raw).is_err(),
+                "{raw:?} should be rejected"
+            );
         }
     }
 

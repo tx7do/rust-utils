@@ -65,7 +65,17 @@ pub const MAX_FILE_SIZE: usize = 10 << 20;
 
 /// 纯文本族的扩展名集合(含 html,但不含 docx/pdf)。
 const PLAIN_TEXT_EXTS: &[&str] = &[
-    ".txt", ".md", ".markdown", ".csv", ".log", ".json", ".xml", ".yml", ".yaml", ".html", ".htm",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".csv",
+    ".log",
+    ".json",
+    ".xml",
+    ".yml",
+    ".yaml",
+    ".html",
+    ".htm",
 ];
 
 /// 提取失败的原因。`Display` 消息与上游 Go 版的错误文案逐字对齐(便于测试与
@@ -113,8 +123,19 @@ impl std::error::Error for DocTextError {}
 /// 未启用——清单描述的是"这套 API 认识什么",而不是"当前构建能解什么"。
 pub fn supported_extensions() -> &'static [&'static str] {
     &[
-        ".txt", ".md", ".markdown", ".csv", ".log", ".json", ".xml", ".yml", ".yaml", ".html",
-        ".htm", ".docx", ".pdf",
+        ".txt",
+        ".md",
+        ".markdown",
+        ".csv",
+        ".log",
+        ".json",
+        ".xml",
+        ".yml",
+        ".yaml",
+        ".html",
+        ".htm",
+        ".docx",
+        ".pdf",
     ]
 }
 
@@ -227,9 +248,7 @@ fn extract_docx(data: &[u8]) -> Result<String, DocTextError> {
     let mut xml_content = Vec::new();
     {
         let mut member = archive.by_name(DOC_XML).map_err(|e| match e {
-            ZipError::FileNotFound => {
-                DocTextError::Docx(format!("{DOC_XML} not found in docx"))
-            }
+            ZipError::FileNotFound => DocTextError::Docx(format!("{DOC_XML} not found in docx")),
             other => DocTextError::Docx(format!("open {DOC_XML}: {other}")),
         })?;
         member
@@ -328,13 +347,16 @@ fn decode_entity(src: &str) -> Option<(String, usize)> {
         return None;
     }
     if let Some(digits) = name.strip_prefix('#') {
-        let (radix, digits) = match digits.strip_prefix('x').or_else(|| digits.strip_prefix('X')) {
+        let (radix, digits) = match digits
+            .strip_prefix('x')
+            .or_else(|| digits.strip_prefix('X'))
+        {
             Some(hex) => (16u32, hex),
             None => (10u32, digits),
         };
-        let all_digits = digits.bytes().all(|b| {
-            b.is_ascii_digit() || (radix == 16 && matches!(b, b'a'..=b'f' | b'A'..=b'F'))
-        });
+        let all_digits = digits
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (radix == 16 && matches!(b, b'a'..=b'f' | b'A'..=b'F')));
         if !all_digits {
             return None;
         }
@@ -413,7 +435,16 @@ mod tests {
     #[test]
     fn test_extract_plain_text_family() {
         for ext in [
-            ".txt", ".md", ".markdown", ".csv", ".log", ".json", ".xml", ".yml", ".yaml", ".html",
+            ".txt",
+            ".md",
+            ".markdown",
+            ".csv",
+            ".log",
+            ".json",
+            ".xml",
+            ".yml",
+            ".yaml",
+            ".html",
             ".htm",
         ] {
             let text = extract(&format!("doc{ext}"), "hello 世界".as_bytes())
@@ -463,8 +494,19 @@ mod tests {
         assert_eq!(
             supported_extensions(),
             &[
-                ".txt", ".md", ".markdown", ".csv", ".log", ".json", ".xml", ".yml", ".yaml",
-                ".html", ".htm", ".docx", ".pdf",
+                ".txt",
+                ".md",
+                ".markdown",
+                ".csv",
+                ".log",
+                ".json",
+                ".xml",
+                ".yml",
+                ".yaml",
+                ".html",
+                ".htm",
+                ".docx",
+                ".pdf",
             ]
         );
     }
@@ -477,8 +519,11 @@ mod tests {
         let mut buf = Cursor::new(Vec::new());
         let mut zw = zip::write::ZipWriter::new(&mut buf);
         for (name, content) in members {
-            zw.start_file((*name).to_string(), zip::write::SimpleFileOptions::default())
-                .unwrap_or_else(|e| panic!("start_file {name}: {e}"));
+            zw.start_file(
+                (*name).to_string(),
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap_or_else(|e| panic!("start_file {name}: {e}"));
             zw.write_all(content.as_bytes())
                 .unwrap_or_else(|e| panic!("write {name}: {e}"));
         }
@@ -508,7 +553,8 @@ mod tests {
     fn test_extract_docx_with_wt_runs() {
         // 真实 docx 的文本包在 <w:t> 里,混着带属性的 rPr/pPr 等节点:
         // 标签(含属性)全剥,只留文本;相邻 run 直接拼接,不补空格。
-        let doc_xml = "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
+        let doc_xml =
+            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
             <w:body><w:p><w:pPr><w:rPr/></w:pPr><w:r><w:rPr/></w:r>\
             <w:t>你好</w:t><w:t xml:space=\"preserve\"> world</w:t></w:p></w:body></w:document>";
         let data = build_docx(&[("word/document.xml", doc_xml)]);
@@ -531,7 +577,9 @@ mod tests {
     fn test_extract_docx_missing_document() {
         let data = build_docx(&[("word/settings.xml", "<settings/>")]);
         let err = extract("a.docx", &data).unwrap_err();
-        assert!(err.to_string().contains("word/document.xml not found in docx"));
+        assert!(err
+            .to_string()
+            .contains("word/document.xml not found in docx"));
     }
 
     #[test]
@@ -546,7 +594,9 @@ mod tests {
     fn test_extract_docx_no_text() {
         let data = build_docx(&[("word/document.xml", "<w:p></w:p>")]);
         let err = extract("a.docx", &data).unwrap_err();
-        assert!(err.to_string().contains("no text content extracted from docx"));
+        assert!(err
+            .to_string()
+            .contains("no text content extracted from docx"));
     }
 
     // ---- pdf ----
@@ -564,7 +614,12 @@ mod tests {
         let mut offsets = [0usize; 6];
         b.extend_from_slice(b"%PDF-1.4\n");
         put_obj(&mut b, &mut offsets, 1, "<< /Type /Catalog /Pages 2 0 R >>");
-        put_obj(&mut b, &mut offsets, 2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        put_obj(
+            &mut b,
+            &mut offsets,
+            2,
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        );
         put_obj(
             &mut b,
             &mut offsets,
@@ -581,7 +636,12 @@ mod tests {
                 content_stream
             ),
         );
-        put_obj(&mut b, &mut offsets, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        put_obj(
+            &mut b,
+            &mut offsets,
+            5,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        );
         let xref = b.len();
         b.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
         for off in &offsets[1..=5] {

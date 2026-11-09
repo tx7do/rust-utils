@@ -64,7 +64,11 @@ struct HuaweiStyle {
 
 impl HuaweiStyle {
     /// 取(按凭证缓存的)OAuth2 访问令牌。
-    fn get_access_token(&self, client_id: &str, client_secret: &str) -> Result<String, NotifyError> {
+    fn get_access_token(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Result<String, NotifyError> {
         let now = chrono::Utc::now().timestamp();
         {
             let cached = self.cached.lock().expect("huawei token 锁");
@@ -106,7 +110,9 @@ impl HuaweiStyle {
         let tok: TokenResp = serde_json::from_str(&body)
             .map_err(|_| NotifyError::Delivery("oauth token response malformed".into()))?;
         if tok.access_token.is_empty() {
-            return Err(NotifyError::Delivery("oauth token response malformed".into()));
+            return Err(NotifyError::Delivery(
+                "oauth token response malformed".into(),
+            ));
         }
 
         let mut cached = self.cached.lock().expect("huawei token 锁");
@@ -136,7 +142,10 @@ impl HuaweiStyle {
         let (status, body) = super::post(
             &self.agent,
             &endpoint,
-            &[("Authorization", auth.as_str()), ("Content-Type", "application/json; charset=UTF-8")],
+            &[
+                ("Authorization", auth.as_str()),
+                ("Content-Type", "application/json; charset=UTF-8"),
+            ],
             &payload,
         )?;
         let provider_id = parse_answer(status, &body)?;
@@ -153,8 +162,16 @@ pub struct Huawei {
 impl Huawei {
     /// 构造华为推送渠道;`allow_private` 仅供本机联调时关闭 SSRF 防线。
     pub fn new(allow_private: bool, cfg: HuaweiConfig) -> Self {
-        let token_url = if cfg.token_url.is_empty() { HUAWEI_TOKEN_URL } else { &cfg.token_url };
-        let send_url = if cfg.send_url.is_empty() { HUAWEI_SEND_URL } else { &cfg.send_url };
+        let token_url = if cfg.token_url.is_empty() {
+            HUAWEI_TOKEN_URL
+        } else {
+            &cfg.token_url
+        };
+        let send_url = if cfg.send_url.is_empty() {
+            HUAWEI_SEND_URL
+        } else {
+            &cfg.send_url
+        };
         Huawei {
             inner: HuaweiStyle {
                 agent: crate::notify::new_client(allow_private),
@@ -186,8 +203,16 @@ pub struct Honor {
 impl Honor {
     /// 构造荣耀推送渠道。
     pub fn new(allow_private: bool, cfg: HuaweiConfig) -> Self {
-        let token_url = if cfg.token_url.is_empty() { HONOR_TOKEN_URL } else { &cfg.token_url };
-        let send_url = if cfg.send_url.is_empty() { HONOR_SEND_URL } else { &cfg.send_url };
+        let token_url = if cfg.token_url.is_empty() {
+            HONOR_TOKEN_URL
+        } else {
+            &cfg.token_url
+        };
+        let send_url = if cfg.send_url.is_empty() {
+            HONOR_SEND_URL
+        } else {
+            &cfg.send_url
+        };
         Honor {
             inner: HuaweiStyle {
                 agent: crate::notify::new_client(allow_private),
@@ -338,20 +363,30 @@ mod tests {
     /// 对齐上游 TestHuaweiInvalidTokenCode:0x80200xxx 段是令牌无效类。
     #[test]
     fn test_invalid_token_code() {
-        let err = parse_answer(200, r#"{"code":80200007,"msg":"answer","requestId":"req-1"}"#)
-            .unwrap_err();
+        let err = parse_answer(
+            200,
+            r#"{"code":80200007,"msg":"answer","requestId":"req-1"}"#,
+        )
+        .unwrap_err();
         assert!(err.is_invalid_token(), "80200xxx 段 = 令牌失效,得到 {err}");
         assert!(err.to_string().contains("80200007"));
         // 段两端同样在册
-        assert!(parse_answer(200, r#"{"code":80200000}"#).unwrap_err().is_invalid_token());
-        assert!(parse_answer(200, r#"{"code":80209999}"#).unwrap_err().is_invalid_token());
+        assert!(parse_answer(200, r#"{"code":80200000}"#)
+            .unwrap_err()
+            .is_invalid_token());
+        assert!(parse_answer(200, r#"{"code":80209999}"#)
+            .unwrap_err()
+            .is_invalid_token());
     }
 
     /// 对齐上游 TestHuaweiNonOKCodeIsTransportError:非失效段厂商码是投递失败。
     #[test]
     fn test_non_ok_code_is_delivery() {
-        let err = parse_answer(200, r#"{"code":80000001,"msg":"answer","requestId":"req-42"}"#)
-            .unwrap_err();
+        let err = parse_answer(
+            200,
+            r#"{"code":80000001,"msg":"answer","requestId":"req-42"}"#,
+        )
+        .unwrap_err();
         assert!(!err.is_invalid_token(), "{err}");
         assert!(matches!(err, NotifyError::Delivery(_)));
         assert!(err.to_string().contains("80000001"));
@@ -366,7 +401,11 @@ mod tests {
     /// 成功路径:requestId 进回执;成功码就是 0x80000000(80000000)。
     #[test]
     fn test_success_parses_request_id() {
-        let id = parse_answer(200, r#"{"code":80000000,"msg":"answer","requestId":"req-42"}"#).unwrap();
+        let id = parse_answer(
+            200,
+            r#"{"code":80000000,"msg":"answer","requestId":"req-42"}"#,
+        )
+        .unwrap();
         assert_eq!(id, "req-42");
     }
 
@@ -380,7 +419,11 @@ mod tests {
 
         let hw = Huawei::new(
             false,
-            HuaweiConfig { client_id: "c".into(), client_secret: "s".into(), ..Default::default() },
+            HuaweiConfig {
+                client_id: "c".into(),
+                client_secret: "s".into(),
+                ..Default::default()
+            },
         );
         let err = hw.send(&Message::new("", "t")).unwrap_err();
         assert!(err.to_string().contains("device token is empty"), "{err}");

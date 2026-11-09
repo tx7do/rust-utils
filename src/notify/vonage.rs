@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Vonage 官方 REST 域。
 pub const DEFAULT_API_BASE: &str = "https://rest.nexmo.com";
@@ -82,10 +82,7 @@ impl Service {
             form_urlencode(&body),
         );
         Ok(Prepared {
-            url: format!(
-                "{}/sms/json",
-                self.cfg.api_base.trim_end_matches('/')
-            ),
+            url: format!("{}/sms/json", self.cfg.api_base.trim_end_matches('/')),
             body,
             content_type: "application/x-www-form-urlencoded",
             headers: Vec::new(),

@@ -13,7 +13,8 @@ use std::io::Read;
 use serde_json::json;
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// LINE 官方 API 域。
@@ -98,7 +99,10 @@ impl Service {
             url: format!("{}/v2/bot/message/push", self.cfg.api_base),
             body: payload.to_string(),
             headers: vec![
-                ("Authorization", format!("Bearer {}", self.cfg.channel_access_token)),
+                (
+                    "Authorization",
+                    format!("Bearer {}", self.cfg.channel_access_token),
+                ),
                 ("Content-Type", "application/json".to_string()),
             ],
         })
@@ -128,7 +132,9 @@ impl NotifyService for Service {
     /// 给 Target 推一条文本消息。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("line destination is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "line destination is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -187,20 +193,28 @@ mod tests {
     fn service() -> Service {
         Service::new(
             true,
-            Config { ref_: "7".into(), channel_access_token: "cat-1".into(), api_base: "https://line.example".into() },
+            Config {
+                ref_: "7".into(),
+                channel_access_token: "cat-1".into(),
+                api_base: "https://line.example".into(),
+            },
         )
     }
 
     #[test]
     fn test_missing_token_is_not_configured() {
         let svc = Service::new(true, Config::default());
-        let err = svc.build_request(&Message::new("U1", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("U1", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
     #[test]
     fn test_empty_destination_is_not_configured() {
-        let err = service().send(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = service()
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -234,15 +248,26 @@ mod tests {
     #[test]
     fn test_plain_when_no_title() {
         let svc = service();
-        let out = svc.build_request(&Message::new("U1", "").with_content("只有正文")).unwrap();
+        let out = svc
+            .build_request(&Message::new("U1", "").with_content("只有正文"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["messages"][0]["text"], "只有正文");
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { channel_access_token: "t".into(), api_base: "http://127.0.0.1:1".into(), ..Config::default() });
-        let err = svc.send(&Message::new("U1", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                channel_access_token: "t".into(),
+                api_base: "http://127.0.0.1:1".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("U1", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 

@@ -92,8 +92,7 @@ impl RequestInfo {
 
     /// 追加一个请求头(键转为小写存储),支持链式调用。
     pub fn with_header(mut self, name: &str, value: impl Into<String>) -> Self {
-        self.headers
-            .insert(name.to_ascii_lowercase(), value.into());
+        self.headers.insert(name.to_ascii_lowercase(), value.into());
         self
     }
 
@@ -133,9 +132,7 @@ fn default_trusted_proxy_cidrs() -> &'static [&'static str] {
 static TRUSTED_PROXIES: OnceLock<RwLock<Vec<IpNet>>> = OnceLock::new();
 
 fn trusted_cell() -> &'static RwLock<Vec<IpNet>> {
-    TRUSTED_PROXIES.get_or_init(|| {
-        RwLock::new(parse_trusted_cidrs(default_trusted_proxy_cidrs()))
-    })
+    TRUSTED_PROXIES.get_or_init(|| RwLock::new(parse_trusted_cidrs(default_trusted_proxy_cidrs())))
 }
 
 /// 解析可信代理配置清单,对应 Go `setTrustedProxiesLocked` 的规则:
@@ -526,7 +523,9 @@ pub fn validate_url(raw_url: &str) -> Result<ValidatedUrl, String> {
     let (scheme, rest) = get_scheme(no_frag)?;
     let scheme = scheme.to_ascii_lowercase();
     if scheme != "http" && scheme != "https" {
-        return Err(format!("unsupported scheme {scheme:?} (only http/https allowed)"));
+        return Err(format!(
+            "unsupported scheme {scheme:?} (only http/https allowed)"
+        ));
     }
     // Go 在解析 authority 前先切掉 ?query
     let rest = match rest.split_once('?') {
@@ -620,13 +619,17 @@ fn parse_optional_port(colon_port: &str) -> Result<Option<u16>, String> {
         return Ok(None);
     }
     let Some(digits) = colon_port.strip_prefix(':') else {
-        return Err(format!("invalid url: invalid port {colon_port:?} after host"));
+        return Err(format!(
+            "invalid url: invalid port {colon_port:?} after host"
+        ));
     };
     if digits.is_empty() {
         return Ok(None);
     }
     if !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(format!("invalid url: invalid port {colon_port:?} after host"));
+        return Err(format!(
+            "invalid url: invalid port {colon_port:?} after host"
+        ));
     }
     digits
         .parse::<u16>()
@@ -666,7 +669,9 @@ pub fn lookup_and_check_host(host: &str) -> Result<Vec<IpAddr>, String> {
     for addr in addrs {
         let ip = addr.ip();
         if is_blocked_ip_addr(ip) {
-            return Err(format!("host {hostname:?} resolves to blocked address {ip}"));
+            return Err(format!(
+                "host {hostname:?} resolves to blocked address {ip}"
+            ));
         }
         result.push(ip);
     }
@@ -705,7 +710,12 @@ mod tests {
     /// 测试用可信代理网段(私有地址)。与 Go trustedV4CIDRs 一致,
     /// 每个用例显式设置以保证可重复。
     fn trusted_v4_cidrs() -> &'static [&'static str] {
-        &["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"]
+        &[
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "127.0.0.0/8",
+        ]
     }
 
     fn build_req(remote_addr: &str, headers: &[(&str, &str)]) -> RequestInfo {
@@ -729,7 +739,10 @@ mod tests {
         // 对端 8.8.8.8 是公网 IP(非可信代理),即使携带伪造的 XFF 也应忽略
         let req = build_req(
             "8.8.8.8:12345",
-            &[("x-forwarded-for", "10.0.0.1, 8.8.8.8"), ("x-real-ip", "127.0.0.1")],
+            &[
+                ("x-forwarded-for", "10.0.0.1, 8.8.8.8"),
+                ("x-real-ip", "127.0.0.1"),
+            ],
         );
         assert_eq!(client_ip_from_request(Some(&req)), "8.8.8.8");
     }
@@ -742,7 +755,10 @@ mod tests {
         set_trusted_proxies(trusted_v4_cidrs());
         // 对端 10.0.0.1 是可信代理;XFF 链 [8.8.8.8, 10.0.0.2]
         // 从右向左:10.0.0.2 是可信跳(跳过),8.8.8.8 是非可信 → 返回 8.8.8.8
-        let req = build_req("10.0.0.1:12345", &[("x-forwarded-for", "8.8.8.8, 10.0.0.2")]);
+        let req = build_req(
+            "10.0.0.1:12345",
+            &[("x-forwarded-for", "8.8.8.8, 10.0.0.2")],
+        );
         assert_eq!(client_ip_from_request(Some(&req)), "8.8.8.8");
     }
 
@@ -752,7 +768,10 @@ mod tests {
         let _g = TRUSTED_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         set_trusted_proxies(trusted_v4_cidrs());
         // 对端 10.0.0.1 可信;XFF [10.0.0.2, 10.0.0.3] 全可信 → 返回最左侧 10.0.0.2
-        let req = build_req("10.0.0.1:12345", &[("x-forwarded-for", "10.0.0.2, 10.0.0.3")]);
+        let req = build_req(
+            "10.0.0.1:12345",
+            &[("x-forwarded-for", "10.0.0.2, 10.0.0.3")],
+        );
         assert_eq!(client_ip_from_request(Some(&req)), "10.0.0.2");
     }
 
@@ -864,7 +883,14 @@ mod tests {
             },
             ParsingCase {
                 name: "invalid entries skipped, valid kept",
-                config: &["", "   ", "999.999.1.1", "not-an-ip", "10.0.0.0/33", "10.0.0.0/8"],
+                config: &[
+                    "",
+                    "   ",
+                    "999.999.1.1",
+                    "not-an-ip",
+                    "10.0.0.0/33",
+                    "10.0.0.0/8",
+                ],
                 trusted: &["10.0.0.1"],
                 untrusted: &["192.168.1.1", "172.16.0.1"],
             },
@@ -911,7 +937,11 @@ mod tests {
             ("bare host without port", "8.8.8.8", "8.8.8.8"),
             ("host port pair", "1.2.3.4:5678", "1.2.3.4"),
             ("domain host", "example.com:80", "example.com"),
-            ("ipv6 literal without brackets", "2001:db8::1", "2001:db8::1"),
+            (
+                "ipv6 literal without brackets",
+                "2001:db8::1",
+                "2001:db8::1",
+            ),
             ("too many colons", "1:2:3", "1:2:3"),
             ("bracketed ipv6 with port", "[::1]:8080", "::1"),
         ];
@@ -928,7 +958,10 @@ mod tests {
         set_trusted_proxies(trusted_v4_cidrs());
         let req = build_req(
             "example.com:80",
-            &[("x-forwarded-for", "203.0.113.7"), ("x-real-ip", "203.0.113.8")],
+            &[
+                ("x-forwarded-for", "203.0.113.7"),
+                ("x-real-ip", "203.0.113.8"),
+            ],
         );
         assert_eq!(
             client_ip_from_request(Some(&req)),
@@ -1153,7 +1186,10 @@ mod tests {
             "http://admin@example.com/",
             "https://user%40host:pass@evil.com/",
         ] {
-            assert!(validate_url(u).is_err(), "携带 userinfo 的 URL {u:?} 应被拒");
+            assert!(
+                validate_url(u).is_err(),
+                "携带 userinfo 的 URL {u:?} 应被拒"
+            );
         }
     }
 
@@ -1233,17 +1269,17 @@ mod tests {
             })
         );
         for bad in [
-            "10.0.0.0",     // 缺 /
-            "10.0.0.0/33",  // 前缀越界
-            "::1/129",      // 前缀越界
-            "10.0.0.0/-1",  // 负前缀
-            "10.0.0.0/abc", // 非数字前缀
-            "10.0.0.0/",    // 空前缀
-            "/8",           // 空地址
-            "999.1.1.1/8",  // 非法地址
+            "10.0.0.0",      // 缺 /
+            "10.0.0.0/33",   // 前缀越界
+            "::1/129",       // 前缀越界
+            "10.0.0.0/-1",   // 负前缀
+            "10.0.0.0/abc",  // 非数字前缀
+            "10.0.0.0/",     // 空前缀
+            "/8",            // 空地址
+            "999.1.1.1/8",   // 非法地址
             "example.com/8", // 非法地址
-            "1.2.3.4/8/8",  // 多余 /
-            "",             // 空串
+            "1.2.3.4/8/8",   // 多余 /
+            "",              // 空串
         ] {
             assert_eq!(parse_cidr(bad), None, "{bad:?} 应解析失败");
         }

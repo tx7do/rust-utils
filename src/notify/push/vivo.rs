@@ -44,7 +44,11 @@ impl Vivo {
         } else {
             cfg.send_url.clone()
         };
-        Vivo { agent: crate::notify::new_client(allow_private), send_url, cfg }
+        Vivo {
+            agent: crate::notify::new_client(allow_private),
+            send_url,
+            cfg,
+        }
     }
 }
 
@@ -58,7 +62,9 @@ impl Service for Vivo {
         if msg.target.is_empty() {
             return Err(NotifyError::NotConfigured("vivo regId is empty".into()));
         }
-        if self.cfg.app_id.is_empty() || self.cfg.app_key.is_empty() || self.cfg.app_secret.is_empty()
+        if self.cfg.app_id.is_empty()
+            || self.cfg.app_key.is_empty()
+            || self.cfg.app_secret.is_empty()
         {
             return Err(NotifyError::NotConfigured(
                 "vivo config incomplete: app_id/app_key/app_secret required".into(),
@@ -73,7 +79,10 @@ impl Service for Vivo {
             ("appKey".to_string(), self.cfg.app_key.clone()),
             ("content".to_string(), msg.content.clone()),
             ("regId".to_string(), msg.target.clone()),
-            ("sign".to_string(), vivo_sign(&self.cfg.app_key, &timestamp, &self.cfg.app_secret)),
+            (
+                "sign".to_string(),
+                vivo_sign(&self.cfg.app_key, &timestamp, &self.cfg.app_secret),
+            ),
             ("timestamp".to_string(), timestamp),
             ("title".to_string(), msg.title.clone()),
         ]);
@@ -108,7 +117,9 @@ pub fn parse_answer(status: u16, body: &str) -> Result<(), NotifyError> {
         return Ok(());
     }
     if answer.code == VIVO_INVALID_CODE {
-        return Err(NotifyError::InvalidToken("invalid regId (code 10080)".into()));
+        return Err(NotifyError::InvalidToken(
+            "invalid regId (code 10080)".into(),
+        ));
     }
     Err(NotifyError::Delivery(format!(
         "vivo push failed: http {status} code {}: {}",
@@ -151,8 +162,12 @@ fn md5(data: &[u8]) -> [u8; 16] {
     }
     msg.extend_from_slice(&bit_len.to_le_bytes());
 
-    let (mut a0, mut b0, mut c0, mut d0) =
-        (0x6745_2301u32, 0xefcd_ab89u32, 0x98ba_dcfeu32, 0x1032_5476u32);
+    let (mut a0, mut b0, mut c0, mut d0) = (
+        0x6745_2301u32,
+        0xefcd_ab89u32,
+        0x98ba_dcfeu32,
+        0x1032_5476u32,
+    );
 
     for chunk in msg.chunks_exact(64) {
         let m: [u32; 16] = std::array::from_fn(|i| {
@@ -166,10 +181,7 @@ fn md5(data: &[u8]) -> [u8; 16] {
                 32..=47 => (b ^ c ^ d, (3 * i + 5) % 16),
                 _ => (c ^ (b | !d), (7 * i) % 16),
             };
-            let tmp = f
-                .wrapping_add(a)
-                .wrapping_add(K[i])
-                .wrapping_add(m[g]);
+            let tmp = f.wrapping_add(a).wrapping_add(K[i]).wrapping_add(m[g]);
             a = d;
             d = c;
             c = b;
@@ -211,7 +223,10 @@ mod tests {
             hex_lower(&md5(b"key-11760000000secret-1"))
         );
         // 不同 appKey 的签名必须不同:签名错对端只会回 sign fail
-        assert_ne!(vivo_sign("key-1", "1760000000", "secret-1"), vivo_sign("key-2", "1760000000", "secret-1"));
+        assert_ne!(
+            vivo_sign("key-1", "1760000000", "secret-1"),
+            vivo_sign("key-2", "1760000000", "secret-1")
+        );
     }
 
     /// 内嵌 MD5 对 RFC 1321 标准测试向量。
@@ -267,11 +282,18 @@ mod tests {
     fn test_pre_dial_checks() {
         let svc = Vivo::new(
             false,
-            VivoConfig { app_id: "100".into(), app_key: "k".into(), ..Default::default() },
+            VivoConfig {
+                app_id: "100".into(),
+                app_key: "k".into(),
+                ..Default::default()
+            },
         );
         let err = svc.send(&Message::new("reg", "t")).unwrap_err();
         assert!(err.is_not_configured());
-        assert!(err.to_string().contains("app_id/app_key/app_secret"), "{err}");
+        assert!(
+            err.to_string().contains("app_id/app_key/app_secret"),
+            "{err}"
+        );
 
         let svc = Vivo::new(
             false,
@@ -290,6 +312,9 @@ mod tests {
     /// 官方单播端点钉死(对齐上游 VivoSendURL)。
     #[test]
     fn test_vivo_send_url_constant() {
-        assert_eq!(VIVO_SEND_URL, "https://push-api.vivo.com.cn/message/notify/unicast");
+        assert_eq!(
+            VIVO_SEND_URL,
+            "https://push-api.vivo.com.cn/message/notify/unicast"
+        );
     }
 }

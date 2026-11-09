@@ -13,7 +13,8 @@ use std::io::Read;
 use serde_json::{Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// Bark 官方服务域。
@@ -87,21 +88,27 @@ impl Service {
             method: "POST",
             url: format!("{}/push", self.server_url),
             body: Value::Object(payload).to_string(),
-            headers: vec![("Content-Type", "application/json; charset=utf-8".to_string())],
+            headers: vec![(
+                "Content-Type",
+                "application/json; charset=utf-8".to_string(),
+            )],
         })
     }
 
     /// 解析 2xx 应答:Bark 把业务结论放 body 的 code 里。
     fn parse_response(&self, body: &str) -> Result<Receipt, NotifyError> {
-        let answer: Value = serde_json::from_str(body)
-            .map_err(|_| NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body))))?;
+        let answer: Value = serde_json::from_str(body).map_err(|_| {
+            NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
+        })?;
         let code = answer.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 200 {
             let mut message = answer.get("message").and_then(Value::as_str).unwrap_or("");
             if message.is_empty() {
                 message = "no message";
             }
-            return Err(NotifyError::Delivery(format!("peer answered code={code}: {message}")));
+            return Err(NotifyError::Delivery(format!(
+                "peer answered code={code}: {message}"
+            )));
         }
         Ok(Receipt::default())
     }
@@ -125,7 +132,9 @@ impl NotifyService for Service {
     /// 给 Target(Bark App 的 device_key)推一条通知。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("bark device_key is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "bark device_key is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -216,7 +225,10 @@ mod tests {
 
         let custom = Service::new(
             true,
-            Config { server_url: "https://bark.self-hosted.example".into(), ..Config::default() },
+            Config {
+                server_url: "https://bark.self-hosted.example".into(),
+                ..Config::default()
+            },
         );
         assert_eq!(
             custom.build_request(&Message::new("k", "t")).unwrap().url,
@@ -227,15 +239,25 @@ mod tests {
     #[test]
     fn test_send_empty_target_is_not_configured() {
         assert_eq!(service().name(), "bark");
-        let err = service().send(&Message::new("", "t").with_content("c")).unwrap_err();
+        let err = service()
+            .send(&Message::new("", "t").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured(), "一次都没联系对端,按\"没尝试\"归类");
     }
 
     #[test]
     fn test_send_blocked_target() {
         // SSRF 防线:生产默认下环回地址一次都拨不出去,归 BlockedTarget。
-        let svc = Service::new(false, Config { server_url: "http://127.0.0.1:1".into(), ..Config::default() });
-        let err = svc.send(&Message::new("device-key", "t").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                server_url: "http://127.0.0.1:1".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("device-key", "t").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
@@ -244,10 +266,14 @@ mod tests {
         let svc = service();
 
         // 成功:code=200。
-        assert!(svc.parse_response(r#"{"code":200,"message":"success","timestamp":1760000000}"#).is_ok());
+        assert!(svc
+            .parse_response(r#"{"code":200,"message":"success","timestamp":1760000000}"#)
+            .is_ok());
 
         // 业务码非 200:HTTP 200 也算失败,错误带业务码与原因。
-        let err = svc.parse_response(r#"{"code":400,"message":"key not found"}"#).unwrap_err();
+        let err = svc
+            .parse_response(r#"{"code":400,"message":"key not found"}"#)
+            .unwrap_err();
         assert!(err.to_string().contains("code=400"), "{err}");
         assert!(err.to_string().contains("key not found"));
         assert!(!err.is_not_configured(), "拨过号被拒 = 投递失败");

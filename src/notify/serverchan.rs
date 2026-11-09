@@ -12,7 +12,8 @@ use std::io::Read;
 use serde_json::Value;
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// Server酱 Turbo 官方域。
@@ -87,21 +88,27 @@ impl Service {
             // SendKey 进路径;真实的 SendKey 是字母数字,不做路径转义(与上游 fmt.Sprintf 一致)。
             url: format!("{}/{}.send", self.cfg.api_base, self.cfg.send_key),
             body: form,
-            headers: vec![("Content-Type", "application/x-www-form-urlencoded".to_string())],
+            headers: vec![(
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_string(),
+            )],
         })
     }
 
     /// 解析 2xx 应答:业务结论在 body 的 code(0 为成功)。
     fn parse_response(&self, body: &str) -> Result<Receipt, NotifyError> {
-        let answer: Value = serde_json::from_str(body)
-            .map_err(|_| NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body))))?;
+        let answer: Value = serde_json::from_str(body).map_err(|_| {
+            NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
+        })?;
         let code = answer.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 0 {
             let mut message = answer.get("message").and_then(Value::as_str).unwrap_or("");
             if message.is_empty() {
                 message = "no message";
             }
-            return Err(NotifyError::Delivery(format!("peer answered code={code}: {message}")));
+            return Err(NotifyError::Delivery(format!(
+                "peer answered code={code}: {message}"
+            )));
         }
         Ok(Receipt::default())
     }
@@ -125,7 +132,9 @@ impl NotifyService for Service {
     /// 推一条消息到绑定的微信。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("serverchan message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "serverchan message body is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -178,7 +187,9 @@ fn query_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => {
                 out.push('%');
@@ -192,8 +203,10 @@ fn query_escape(s: &str) -> String {
 
 /// 参数对的有序表单编码(按键名排序,键与值均经 `query_escape` 编码,对齐 Go url.Values.Encode)。
 fn form_encode(pairs: &[(&str, &str)]) -> String {
-    let mut pairs: Vec<(String, String)> =
-        pairs.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
+    let mut pairs: Vec<(String, String)> = pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect();
     pairs.sort();
     pairs
         .iter()
@@ -213,7 +226,11 @@ mod tests {
     fn service() -> Service {
         Service::new(
             true,
-            Config { ref_: "7".into(), send_key: "SCT123456".into(), api_base: "https://sct.example".into() },
+            Config {
+                ref_: "7".into(),
+                send_key: "SCT123456".into(),
+                api_base: "https://sct.example".into(),
+            },
         )
     }
 
@@ -221,7 +238,9 @@ mod tests {
     fn test_missing_send_key_is_not_configured() {
         let svc = Service::new(true, Config::default());
         assert_eq!(svc.name(), "serverchan");
-        let err = svc.build_request(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -234,31 +253,55 @@ mod tests {
     #[test]
     fn test_build_request_delivers_form_to_keyed_endpoint() {
         let svc = service();
-        let out = svc.build_request(&Message::new("", "服务器告警").with_content("CPU 95%")).unwrap();
+        let out = svc
+            .build_request(&Message::new("", "服务器告警").with_content("CPU 95%"))
+            .unwrap();
 
         assert_eq!(out.method, "POST");
-        assert_eq!(out.url, "https://sct.example/SCT123456.send", "SendKey 进路径");
+        assert_eq!(
+            out.url, "https://sct.example/SCT123456.send",
+            "SendKey 进路径"
+        );
         assert_eq!(out.headers[0].1, "application/x-www-form-urlencoded");
 
         // 表单按键名排序(desp、title)。
-        assert!(out.body.starts_with("desp="), "表单按键名排序: {}", out.body);
-        assert!(out.body.contains("title=%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%91%8A%E8%AD%A6"));
+        assert!(
+            out.body.starts_with("desp="),
+            "表单按键名排序: {}",
+            out.body
+        );
+        assert!(out
+            .body
+            .contains("title=%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%91%8A%E8%AD%A6"));
         assert!(out.body.contains("desp=CPU+95%25"), "desp 是 Markdown 正文");
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { send_key: "k".into(), api_base: "http://127.0.0.1:1".into(), ..Config::default() });
-        let err = svc.send(&Message::new("", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                send_key: "k".into(),
+                api_base: "http://127.0.0.1:1".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
     #[test]
     fn test_parse_response_business_code() {
         let svc = service();
-        assert!(svc.parse_response(r#"{"code":0,"message":"","data":{"pushed":"1","total":"1"}}"#).is_ok());
+        assert!(svc
+            .parse_response(r#"{"code":0,"message":"","data":{"pushed":"1","total":"1"}}"#)
+            .is_ok());
 
-        let err = svc.parse_response(r#"{"code":40001,"message":"用户不存在"}"#).unwrap_err();
+        let err = svc
+            .parse_response(r#"{"code":40001,"message":"用户不存在"}"#)
+            .unwrap_err();
         assert!(err.to_string().contains("code=40001"), "{err}");
         assert!(err.to_string().contains("用户不存在"));
         assert!(!err.is_not_configured(), "拨过号被拒 = 投递失败");

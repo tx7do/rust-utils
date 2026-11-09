@@ -421,12 +421,7 @@ fn is_table_stop_word(word: &str) -> bool {
 /// 从 `toks[i]` 起解析表引用:`[schema.]table [AS alias]`,multi 时
 /// 支持逗号连接多个。遇到子查询 `'('`、停用词或其它非标识 token 即止,
 /// 返回停止处的 token 下标(供主扫描继续找后续关键字,如 JOIN)。
-fn parse_tables(
-    toks: &[SqlToken],
-    mut i: usize,
-    multi: bool,
-    add: &mut dyn FnMut(&str),
-) -> usize {
+fn parse_tables(toks: &[SqlToken], mut i: usize, multi: bool, add: &mut dyn FnMut(&str)) -> usize {
     while i < toks.len() {
         let (name, next) = match parse_ident_ref(toks, i) {
             Some(found) => found,
@@ -502,11 +497,7 @@ mod tests {
                 r"WHERE n = 'O\'Brien'",
                 "WHERE n = ***",
             ),
-            (
-                "E 转义串",
-                r"WHERE a = E'x\ny'",
-                "WHERE a = ***",
-            ),
+            ("E 转义串", r"WHERE a = E'x\ny'", "WHERE a = ***"),
             (
                 "数值字面量脱敏",
                 "WHERE age > 25 AND score = 1.5e-3",
@@ -537,11 +528,7 @@ mod tests {
                 "DO $$ BEGIN RAISE 'hi'; END $$",
                 "DO ***",
             ),
-            (
-                "美元引用带标签整体脱敏",
-                "$fn$ body 'q' $fn$",
-                "***",
-            ),
+            ("美元引用带标签整体脱敏", "$fn$ body 'q' $fn$", "***"),
             (
                 "INSERT VALUES 与 RETURNING",
                 "INSERT INTO t (a,b) VALUES ('x', 42) RETURNING id",
@@ -552,11 +539,7 @@ mod tests {
                 "WHERE x = 'a'::text AND n = 5::int",
                 "WHERE x = ***::text AND n = ***::int",
             ),
-            (
-                "空串脱敏",
-                "SET a = ''",
-                "SET a = ***",
-            ),
+            ("空串脱敏", "SET a = ''", "SET a = ***"),
             (
                 "十六进制串",
                 "INSERT INTO t VALUES (X'deadbeef')",
@@ -567,11 +550,7 @@ mod tests {
                 "SELECT * FROM t LIMIT 10 OFFSET 0",
                 "SELECT * FROM t LIMIT *** OFFSET ***",
             ),
-            (
-                "未闭合串脱敏到末尾",
-                "WHERE a = 'abc",
-                "WHERE a = ***",
-            ),
+            ("未闭合串脱敏到末尾", "WHERE a = 'abc", "WHERE a = ***"),
             (
                 "UPDATE SET",
                 "UPDATE users SET nickname = '喵', age = 30 WHERE id = 5",
@@ -598,11 +577,7 @@ mod tests {
     #[test]
     fn test_mask_sql_lexer_edges() {
         let cases: &[(&str, &str, &str)] = &[
-            (
-                "未闭合字符串脱敏到末尾",
-                "WHERE a = 'abc",
-                "WHERE a = ***",
-            ),
+            ("未闭合字符串脱敏到末尾", "WHERE a = 'abc", "WHERE a = ***"),
             (
                 "引号标识符内双引号转义原样保留",
                 r#"SELECT "a""b" FROM t"#,
@@ -628,16 +603,8 @@ mod tests {
                 "SELECT 1 -- trailing comment",
                 "SELECT *** -- trailing comment",
             ),
-            (
-                "占位符处于串末尾",
-                "WHERE id = $1",
-                "WHERE id = $1",
-            ),
-            (
-                "孤立美元符号原样保留",
-                "a $ b",
-                "a $ b",
-            ),
+            ("占位符处于串末尾", "WHERE id = $1", "WHERE id = $1"),
+            ("孤立美元符号原样保留", "a $ b", "a $ b"),
             (
                 "美元引用整体脱敏",
                 "SELECT $tag$secret body$tag$ FROM t",
@@ -648,11 +615,7 @@ mod tests {
                 "SELECT $$secret$$ FROM t",
                 "SELECT *** FROM t",
             ),
-            (
-                "十六进制数值脱敏",
-                "WHERE a = 0xFF",
-                "WHERE a = ***",
-            ),
+            ("十六进制数值脱敏", "WHERE a = 0xFF", "WHERE a = ***"),
         ];
         for (name, input, want) in cases {
             assert_eq!(mask_sql(input), *want, "case: {name}");
@@ -724,11 +687,7 @@ mod tests {
                 "select * from sys_users where id = 1",
                 &["sys_users"],
             ),
-            (
-                "no from ddl-ish",
-                "SHOW server_version",
-                &[],
-            ),
+            ("no from ddl-ish", "SHOW server_version", &[]),
             (
                 "masked literals present",
                 r#"SELECT "t"."a" FROM "t" WHERE "t"."name" = *** AND "t"."n" > ***"#,

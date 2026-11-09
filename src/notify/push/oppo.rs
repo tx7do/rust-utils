@@ -52,10 +52,16 @@ pub struct Oppo {
 impl Oppo {
     /// 构造 OPPO 推送渠道;`allow_private` 仅供本机联调时关闭 SSRF 防线。
     pub fn new(allow_private: bool, cfg: OppoConfig) -> Self {
-        let auth_url =
-            if cfg.auth_url.is_empty() { OPPO_AUTH_URL.to_string() } else { cfg.auth_url.clone() };
-        let send_url =
-            if cfg.send_url.is_empty() { OPPO_SEND_URL.to_string() } else { cfg.send_url.clone() };
+        let auth_url = if cfg.auth_url.is_empty() {
+            OPPO_AUTH_URL.to_string()
+        } else {
+            cfg.auth_url.clone()
+        };
+        let send_url = if cfg.send_url.is_empty() {
+            OPPO_SEND_URL.to_string()
+        } else {
+            cfg.send_url.clone()
+        };
         Oppo {
             agent: crate::notify::new_client(allow_private),
             cfg,
@@ -133,7 +139,9 @@ impl Service for Oppo {
     /// Title 按 28 runes 截断(厂商上限 32 字符,超了 400)。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("oppo registration_id is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "oppo registration_id is empty".into(),
+            ));
         }
         if self.cfg.app_key.is_empty() || self.cfg.app_secret.is_empty() {
             return Err(NotifyError::NotConfigured(
@@ -147,7 +155,10 @@ impl Service for Oppo {
             ("click_action_type".to_string(), "0".to_string()),
             ("content".to_string(), msg.content.clone()),
             ("registration_id".to_string(), msg.target.clone()),
-            ("title".to_string(), super::truncate_runes(&msg.title, OPPO_TITLE_MAX)),
+            (
+                "title".to_string(),
+                super::truncate_runes(&msg.title, OPPO_TITLE_MAX),
+            ),
         ]);
         let (status, body) = super::post(
             &self.agent,
@@ -194,7 +205,11 @@ mod tests {
     fn test_title_truncated_to_28_runes() {
         let long = "重".repeat(40);
         let truncated = super::super::truncate_runes(&long, OPPO_TITLE_MAX);
-        assert_eq!(truncated.chars().count(), OPPO_TITLE_MAX, "标题按 rune 截到 28 个");
+        assert_eq!(
+            truncated.chars().count(),
+            OPPO_TITLE_MAX,
+            "标题按 rune 截到 28 个"
+        );
         assert_eq!(truncated.chars().next().unwrap(), '重', "截断是前缀截断");
 
         // 发送表单里的 title 也是截断后的
@@ -213,8 +228,12 @@ mod tests {
     /// 对齐上游 TestOppoInvalidRegistrationID:2008 = registration_id 失效。
     #[test]
     fn test_invalid_registration_id() {
-        let err = parse_answer(200, r#"{"code":2008,"message":"registration_id invalid"}"#).unwrap_err();
-        assert!(err.is_invalid_token(), "2008 = registration_id 失效,得到 {err}");
+        let err =
+            parse_answer(200, r#"{"code":2008,"message":"registration_id invalid"}"#).unwrap_err();
+        assert!(
+            err.is_invalid_token(),
+            "2008 = registration_id 失效,得到 {err}"
+        );
     }
 
     /// 非失效码 / HTTP 层失败归投递失败。
@@ -246,17 +265,30 @@ mod tests {
 
         let svc = Oppo::new(
             false,
-            OppoConfig { app_key: "k".into(), app_secret: "s".into(), ..Default::default() },
+            OppoConfig {
+                app_key: "k".into(),
+                app_secret: "s".into(),
+                ..Default::default()
+            },
         );
         let err = svc.send(&Message::new("", "t")).unwrap_err();
-        assert!(err.to_string().contains("registration_id is empty"), "{err}");
+        assert!(
+            err.to_string().contains("registration_id is empty"),
+            "{err}"
+        );
         assert_eq!(Service::name(&svc), "oppo");
     }
 
     /// 官方端点钉死:key/secret 鉴权与单播通知两段,对齐上游 OppoAuthURL/OppoSendURL。
     #[test]
     fn test_oppo_endpoint_constants() {
-        assert_eq!(OPPO_AUTH_URL, "https://push.oppomobile.com/server/v1/message/auth/aliyun");
-        assert_eq!(OPPO_SEND_URL, "https://push.oppomobile.com/server/v1/message/notification/unicast");
+        assert_eq!(
+            OPPO_AUTH_URL,
+            "https://push.oppomobile.com/server/v1/message/auth/aliyun"
+        );
+        assert_eq!(
+            OPPO_SEND_URL,
+            "https://push.oppomobile.com/server/v1/message/notification/unicast"
+        );
     }
 }

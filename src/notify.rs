@@ -32,8 +32,8 @@ use std::sync::{Arc, OnceLock};
 
 pub mod bark;
 pub mod datadog;
-pub mod discord;
 pub mod dingtalk;
+pub mod discord;
 pub mod email;
 pub mod feishu;
 pub mod gchat;
@@ -65,8 +65,8 @@ pub mod teams;
 pub mod telegram;
 pub mod twilio;
 pub mod vonage;
-pub mod webhook;
 pub mod webex;
+pub mod webhook;
 pub mod wechat;
 pub mod wecom;
 pub mod whatsapp;
@@ -318,10 +318,7 @@ pub struct GuardedResolver;
 impl ureq::Resolver for GuardedResolver {
     fn resolve(&self, netloc: &str) -> std::io::Result<Vec<SocketAddr>> {
         let all: Vec<SocketAddr> = netloc.to_socket_addrs()?.collect();
-        let allowed: Vec<SocketAddr> = all
-            .into_iter()
-            .filter(|a| !is_blocked_ip(a.ip()))
-            .collect();
+        let allowed: Vec<SocketAddr> = all.into_iter().filter(|a| !is_blocked_ip(a.ip())).collect();
         if allowed.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -387,7 +384,9 @@ pub fn check_target(url: &str) -> Result<(), NotifyError> {
         .unwrap_or("");
     let host = host.split(':').next().unwrap_or("");
     if host.is_empty() {
-        return Err(NotifyError::NotConfigured(format!("url has no host: {url}")));
+        return Err(NotifyError::NotConfigured(format!(
+            "url has no host: {url}"
+        )));
     }
     let addrs: Vec<IpAddr> = (host, 0)
         .to_socket_addrs()
@@ -460,7 +459,10 @@ mod tests {
         }
         // 公网放行
         for ip in ["8.8.8.8", "1.1.1.1", "2606:4700::1111"] {
-            assert!(!is_blocked_ip(ip.parse().unwrap()), "{ip} should be allowed");
+            assert!(
+                !is_blocked_ip(ip.parse().unwrap()),
+                "{ip} should be allowed"
+            );
         }
         // 边界:100.63.255.255 不在 CGNAT,100.64.0.0 在
         assert!(!is_blocked_ip("100.63.255.255".parse().unwrap()));
@@ -539,7 +541,9 @@ mod tests {
         assert!(!e.is_blocked_target());
         assert!(NotifyError::InvalidToken("x".into()).is_invalid_token());
         assert!(NotifyError::BlockedTarget("x".into()).is_blocked_target());
-        assert!(NotifyError::Delivery("x".into()).to_string().contains("delivery failed"));
+        assert!(NotifyError::Delivery("x".into())
+            .to_string()
+            .contains("delivery failed"));
 
         let msg = Message::new("t", "title")
             .with_content("c")

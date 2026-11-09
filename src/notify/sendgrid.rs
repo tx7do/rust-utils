@@ -9,9 +9,9 @@
 //!
 //! 测试离线进行:请求构造(payload 形态)与回执解析拆成纯函数断言,不真实连网。
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// SendGrid 官方 API 域。
 pub const DEFAULT_API_BASE: &str = "https://api.sendgrid.com";
@@ -63,7 +63,9 @@ impl Service {
     /// 构造请求(纯函数):Bearer 令牌进鉴权头,payload 按 v3 形态组装。
     fn build_request(&self, msg: &Message) -> Result<Prepared, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("sendgrid recipient is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "sendgrid recipient is empty".into(),
+            ));
         }
         if self.cfg.api_key.is_empty() || self.cfg.from.is_empty() {
             return Err(NotifyError::NotConfigured(
@@ -71,7 +73,9 @@ impl Service {
             ));
         }
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("sendgrid message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "sendgrid message body is empty".into(),
+            ));
         }
         Ok(Prepared {
             url: format!("{}{SEND_PATH}", self.cfg.api_base),
@@ -83,7 +87,11 @@ impl Service {
 
     /// 解析回执(纯函数):受理(2xx)即成功,消息 ID 从响应头
     /// `X-Message-Id` 取(拿不到留空)。
-    fn parse_answer(status: u16, body: &str, message_id: Option<&str>) -> Result<Receipt, NotifyError> {
+    fn parse_answer(
+        status: u16,
+        body: &str,
+        message_id: Option<&str>,
+    ) -> Result<Receipt, NotifyError> {
         if !(200..300).contains(&status) {
             return Err(NotifyError::Delivery(format!(
                 "peer answered {status}: {}",
@@ -199,7 +207,8 @@ mod tests {
         let svc = Service::new(full_cfg());
         let req = svc
             .build_request(
-                &Message::new("alice@example.com", "重置验证码").with_content("您的验证码是 123456"),
+                &Message::new("alice@example.com", "重置验证码")
+                    .with_content("您的验证码是 123456"),
             )
             .unwrap();
         assert_eq!(req.url, "https://api.sendgrid.com/v3/mail/send");
@@ -212,7 +221,10 @@ mod tests {
 
         let payload: Value = serde_json::from_str(&req.body).unwrap();
         let to = &payload["personalizations"][0]["to"][0];
-        assert_eq!(to["email"], "alice@example.com", "收件人进 personalizations");
+        assert_eq!(
+            to["email"], "alice@example.com",
+            "收件人进 personalizations"
+        );
         assert_eq!(payload["from"]["email"], "noreply@example.com");
         assert_eq!(payload["subject"], "重置验证码");
         assert_eq!(payload["content"][0]["type"], "text/plain");
@@ -229,7 +241,9 @@ mod tests {
         assert!(err.to_string().contains("api_key/from required"), "{err}");
 
         let svc = Service::new(full_cfg());
-        let err = svc.send(&Message::new("", "t").with_content("c")).unwrap_err();
+        let err = svc
+            .send(&Message::new("", "t").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured(), "{err}");
         assert!(err.to_string().contains("recipient is empty"), "{err}");
 
@@ -255,7 +269,12 @@ mod tests {
     // build_payload 纯函数:与上游测试的 JSON 形态逐字段对齐。
     #[test]
     fn test_build_payload() {
-        let payload = build_payload("alice@example.com", "noreply@example.com", "重置验证码", "您的验证码是 123456");
+        let payload = build_payload(
+            "alice@example.com",
+            "noreply@example.com",
+            "重置验证码",
+            "您的验证码是 123456",
+        );
         assert_eq!(
             payload,
             json!({
@@ -271,12 +290,16 @@ mod tests {
     #[test]
     fn test_parse_answer() {
         let receipt = Service::parse_answer(202, "", Some("sg-msg-1")).unwrap();
-        assert_eq!(receipt.provider_id, "sg-msg-1", "X-Message-Id 响应头要进回执");
+        assert_eq!(
+            receipt.provider_id, "sg-msg-1",
+            "X-Message-Id 响应头要进回执"
+        );
 
         let receipt = Service::parse_answer(202, "", None).unwrap();
         assert_eq!(receipt.provider_id, "");
 
-        let err = Service::parse_answer(400, r#"{"errors":[{"message":"Bad Request"}]}"#, None).unwrap_err();
+        let err = Service::parse_answer(400, r#"{"errors":[{"message":"Bad Request"}]}"#, None)
+            .unwrap_err();
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(err.to_string().contains("400"), "{err}");
 

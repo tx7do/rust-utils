@@ -2,9 +2,9 @@
 //!
 //! 测试离线进行:请求构造与回执解析拆成纯函数断言,不真实连网。
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Webex 官方 API 域。
 pub const DEFAULT_API_BASE: &str = "https://webexapis.com";
@@ -200,10 +200,7 @@ mod tests {
             .build_request(&Message::new("ROOM1", "部署完成").with_content("v1.2.0 已上线"))
             .unwrap();
         assert_eq!(req.url, "https://webex.example.test/v1/messages");
-        assert_eq!(
-            req.headers[0],
-            ("Authorization", "Bearer bt-1".to_string())
-        );
+        assert_eq!(req.headers[0], ("Authorization", "Bearer bt-1".to_string()));
         let payload: Value = serde_json::from_str(&req.body).unwrap();
         assert_eq!(payload["roomId"], "ROOM1");
         assert!(
@@ -231,8 +228,8 @@ mod tests {
     // 回执解析:消息 id 进回执;应答非 JSON 不判失败;非 2xx 归投递失败。
     #[test]
     fn test_parse_answer() {
-        let receipt = Service::parse_answer(200, r#"{"id":"msg-1","roomId":"ROOM1","text":"x"}"#)
-            .unwrap();
+        let receipt =
+            Service::parse_answer(200, r#"{"id":"msg-1","roomId":"ROOM1","text":"x"}"#).unwrap();
         assert_eq!(receipt.provider_id, "msg-1");
 
         let receipt = Service::parse_answer(200, "not json").unwrap();

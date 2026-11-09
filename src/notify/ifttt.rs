@@ -11,7 +11,8 @@ use std::io::Read;
 use serde_json::{json, Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// IFTTT Maker Webhooks 官方域。
@@ -89,7 +90,10 @@ impl Service {
         Ok(Outbound {
             method: "POST",
             // 事件名与 key 直拼进 URL(与上游 fmt.Sprintf 一致,不做转义)。
-            url: format!("{}/trigger/{}/json?key={}", self.cfg.api_base, msg.target, self.cfg.api_key),
+            url: format!(
+                "{}/trigger/{}/json?key={}",
+                self.cfg.api_base, msg.target, self.cfg.api_key
+            ),
             body: Value::Object(payload).to_string(),
             headers: vec![("Content-Type", "application/json".to_string())],
         })
@@ -175,20 +179,31 @@ mod tests {
     use super::*;
 
     fn service() -> Service {
-        Service::new(true, Config { ref_: "7".into(), api_key: "k-1".into(), api_base: "https://ifttt.example".into() })
+        Service::new(
+            true,
+            Config {
+                ref_: "7".into(),
+                api_key: "k-1".into(),
+                api_base: "https://ifttt.example".into(),
+            },
+        )
     }
 
     #[test]
     fn test_missing_api_key_is_not_configured() {
         let svc = Service::new(true, Config::default());
         assert_eq!(svc.name(), "ifttt");
-        let err = svc.build_request(&Message::new("evt", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("evt", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
     #[test]
     fn test_empty_event_is_not_configured() {
-        let err = service().send(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = service()
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -201,7 +216,10 @@ mod tests {
         let out = svc.build_request(&msg).unwrap();
 
         assert_eq!(out.method, "POST");
-        assert_eq!(out.url, "https://ifttt.example/trigger/build_done/json?key=k-1", "事件名进路径,key 进 query");
+        assert_eq!(
+            out.url, "https://ifttt.example/trigger/build_done/json?key=k-1",
+            "事件名进路径,key 进 query"
+        );
 
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["value1"], "构建完成");
@@ -209,15 +227,26 @@ mod tests {
         assert_eq!(payload["value3"], "v1.2.0", "value3 从 Params 取");
 
         // 没配 value3 就不发这个键。
-        let out = svc.build_request(&Message::new("e", "").with_content("c")).unwrap();
+        let out = svc
+            .build_request(&Message::new("e", "").with_content("c"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert!(payload.get("value3").is_none());
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { api_key: "k".into(), api_base: "http://127.0.0.1:1".into(), ..Config::default() });
-        let err = svc.send(&Message::new("evt", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                api_key: "k".into(),
+                api_base: "http://127.0.0.1:1".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("evt", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
@@ -232,6 +261,9 @@ mod tests {
 
     #[test]
     fn test_parse_response_is_always_ok() {
-        assert_eq!(service().parse_response("Congratulations!").unwrap(), Receipt::default());
+        assert_eq!(
+            service().parse_response("Congratulations!").unwrap(),
+            Receipt::default()
+        );
     }
 }

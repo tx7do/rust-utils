@@ -13,7 +13,8 @@ use std::io::Read;
 use serde_json::{json, Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// 应答读取上限。
@@ -85,7 +86,10 @@ impl Service {
             method: "POST",
             url: self.cfg.webhook_url.clone(),
             body: Value::Object(payload).to_string(),
-            headers: vec![("Content-Type", "application/json; charset=utf-8".to_string())],
+            headers: vec![(
+                "Content-Type",
+                "application/json; charset=utf-8".to_string(),
+            )],
         })
     }
 
@@ -118,7 +122,9 @@ impl NotifyService for Service {
     /// 发一条文本消息。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("gchat message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "gchat message body is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -174,13 +180,21 @@ mod tests {
     use super::*;
 
     fn service() -> Service {
-        Service::new(true, Config { ref_: "7".into(), webhook_url: "https://chat.example/v1/spaces/AAA/messages?key=k".into() })
+        Service::new(
+            true,
+            Config {
+                ref_: "7".into(),
+                webhook_url: "https://chat.example/v1/spaces/AAA/messages?key=k".into(),
+            },
+        )
     }
 
     #[test]
     fn test_missing_webhook_url_is_not_configured() {
         let svc = Service::new(true, Config::default());
-        let err = svc.build_request(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -201,22 +215,35 @@ mod tests {
         assert_eq!(out.url, "https://chat.example/v1/spaces/AAA/messages?key=k");
 
         let payload: Value = serde_json::from_str(&out.body).unwrap();
-        assert_eq!(payload["text"], "*重置验证码*\n您的验证码是 123456", "Title 以粗体行起头");
+        assert_eq!(
+            payload["text"], "*重置验证码*\n您的验证码是 123456",
+            "Title 以粗体行起头"
+        );
         assert_eq!(out.headers[0].1, "application/json; charset=utf-8");
     }
 
     #[test]
     fn test_plain_when_no_title() {
         let svc = service();
-        let out = svc.build_request(&Message::new("", "").with_content("只有正文")).unwrap();
+        let out = svc
+            .build_request(&Message::new("", "").with_content("只有正文"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["text"], "只有正文");
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { webhook_url: "http://127.0.0.1:1/hook".into(), ..Config::default() });
-        let err = svc.send(&Message::new("", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                webhook_url: "http://127.0.0.1:1/hook".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
@@ -224,9 +251,14 @@ mod tests {
     fn test_parse_response_resource_name() {
         let svc = service();
         let receipt = svc
-            .parse_response(r#"{"sender":{},"text":"t","thread":{},"name":"spaces/AAA/messages/BBB"}"#)
+            .parse_response(
+                r#"{"sender":{},"text":"t","thread":{},"name":"spaces/AAA/messages/BBB"}"#,
+            )
             .unwrap();
-        assert_eq!(receipt.provider_id, "spaces/AAA/messages/BBB", "消息资源名要进回执");
+        assert_eq!(
+            receipt.provider_id, "spaces/AAA/messages/BBB",
+            "消息资源名要进回执"
+        );
         assert_eq!(svc.parse_response("{}").unwrap().provider_id, "");
     }
 

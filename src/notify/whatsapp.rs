@@ -3,9 +3,9 @@
 //! 收件人须先与业务号码开启会话(24h 窗口或模板消息);本渠道只管 text 形态直发。
 //! 测试离线进行:请求构造与回执解析拆成纯函数断言,不真实连网。
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Meta Graph API 域。
 pub const DEFAULT_API_BASE: &str = "https://graph.facebook.com";
@@ -233,14 +233,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            req.url,
-            "https://graph.example.test/v21.0/1065403/messages",
+            req.url, "https://graph.example.test/v21.0/1065403/messages",
             "版本段与号码 ID 进路径"
         );
-        assert_eq!(
-            req.headers[0],
-            ("Authorization", "Bearer eaag".to_string())
-        );
+        assert_eq!(req.headers[0], ("Authorization", "Bearer eaag".to_string()));
         let payload: Value = serde_json::from_str(&req.body).unwrap();
         assert_eq!(payload["messaging_product"], "whatsapp");
         assert_eq!(payload["recipient_type"], "individual");

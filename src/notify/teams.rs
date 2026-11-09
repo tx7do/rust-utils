@@ -13,7 +13,8 @@ use std::io::Read;
 use serde_json::json;
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// 应答读取上限。
@@ -134,7 +135,9 @@ impl NotifyService for Service {
     /// 发一张 Adaptive Card。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("teams message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "teams message body is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -191,14 +194,22 @@ mod tests {
     use serde_json::Value;
 
     fn service() -> Service {
-        Service::new(true, Config { ref_: "7".into(), webhook_url: "https://webhook.office.com/workflow/1".into() })
+        Service::new(
+            true,
+            Config {
+                ref_: "7".into(),
+                webhook_url: "https://webhook.office.com/workflow/1".into(),
+            },
+        )
     }
 
     #[test]
     fn test_missing_webhook_url_is_not_configured() {
         let svc = Service::new(true, Config::default());
         assert_eq!(svc.name(), "teams");
-        let err = svc.build_request(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -223,7 +234,10 @@ mod tests {
 
         let attachments = payload["attachments"].as_array().unwrap();
         assert_eq!(attachments.len(), 1);
-        assert_eq!(attachments[0]["contentType"], "application/vnd.microsoft.card.adaptive");
+        assert_eq!(
+            attachments[0]["contentType"],
+            "application/vnd.microsoft.card.adaptive"
+        );
 
         let content = &attachments[0]["content"];
         assert_eq!(content["type"], "AdaptiveCard");
@@ -239,17 +253,29 @@ mod tests {
     #[test]
     fn test_plain_body_when_no_title() {
         let svc = service();
-        let out = svc.build_request(&Message::new("", "").with_content("只有正文")).unwrap();
+        let out = svc
+            .build_request(&Message::new("", "").with_content("只有正文"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
-        let blocks = payload["attachments"][0]["content"]["body"].as_array().unwrap();
+        let blocks = payload["attachments"][0]["content"]["body"]
+            .as_array()
+            .unwrap();
         assert_eq!(blocks.len(), 1, "无 Title 只有一个正文块");
         assert_eq!(blocks[0]["text"], "只有正文");
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { webhook_url: "http://127.0.0.1:1/hook".into(), ..Config::default() });
-        let err = svc.send(&Message::new("", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                webhook_url: "http://127.0.0.1:1/hook".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 

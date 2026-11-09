@@ -12,7 +12,8 @@ use std::io::Read;
 use serde_json::{json, Map, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// 应答读取上限。
@@ -117,7 +118,9 @@ impl NotifyService for Service {
     /// 发一条 markdown 文本。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("mattermost message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "mattermost message body is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -187,7 +190,9 @@ mod tests {
     fn test_missing_webhook_url_is_not_configured() {
         let svc = Service::new(true, Config::default());
         assert_eq!(svc.name(), "mattermost");
-        let err = svc.build_request(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -200,20 +205,33 @@ mod tests {
     #[test]
     fn test_build_request_markdown_text() {
         let svc = service();
-        let out = svc.build_request(&Message::new("", "磁盘告警").with_content("用量 92%")).unwrap();
+        let out = svc
+            .build_request(&Message::new("", "磁盘告警").with_content("用量 92%"))
+            .unwrap();
 
         assert_eq!(out.method, "POST");
         assert_eq!(out.url, "https://mm.example/hooks/key-1");
 
         let payload: Value = serde_json::from_str(&out.body).unwrap();
-        assert_eq!(payload["text"], "**磁盘告警**\n用量 92%", "Mattermost 的粗体是 **text**");
+        assert_eq!(
+            payload["text"], "**磁盘告警**\n用量 92%",
+            "Mattermost 的粗体是 **text**"
+        );
         assert_eq!(payload["channel"], "#ops", "Channel 覆盖 webhook 默认频道");
     }
 
     #[test]
     fn test_plain_text_when_no_title_and_no_channel() {
-        let svc = Service::new(true, Config { webhook_url: "https://mm.example/hooks/k".into(), ..Config::default() });
-        let out = svc.build_request(&Message::new("", "").with_content("只有正文")).unwrap();
+        let svc = Service::new(
+            true,
+            Config {
+                webhook_url: "https://mm.example/hooks/k".into(),
+                ..Config::default()
+            },
+        );
+        let out = svc
+            .build_request(&Message::new("", "").with_content("只有正文"))
+            .unwrap();
         let payload: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(payload["text"], "只有正文");
         assert!(payload.get("channel").is_none(), "未配 channel 不占字段");
@@ -221,8 +239,16 @@ mod tests {
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { webhook_url: "http://127.0.0.1:1/hooks/k".into(), ..Config::default() });
-        let err = svc.send(&Message::new("", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                webhook_url: "http://127.0.0.1:1/hooks/k".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 

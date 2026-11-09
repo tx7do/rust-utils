@@ -184,7 +184,11 @@ pub fn parse_answer(status: u16, body: &str) -> Result<String, NotifyError> {
     }
     let st = &answer.response.send_status_set[0];
     if st.code != "Ok" {
-        let message = if st.message.is_empty() { "no message" } else { &st.message };
+        let message = if st.message.is_empty() {
+            "no message"
+        } else {
+            &st.message
+        };
         return Err(NotifyError::Delivery(format!(
             "provider answered Code={}: {message}",
             st.code
@@ -208,9 +212,21 @@ pub(super) fn send(
     } else {
         cfg.region.clone()
     };
-    let payload = build_payload(phone, &cfg.app_id, &cfg.sign_name, &cfg.template_code, template_params);
+    let payload = build_payload(
+        phone,
+        &cfg.app_id,
+        &cfg.sign_name,
+        &cfg.template_code,
+        template_params,
+    );
     let now = chrono::Utc::now().timestamp();
-    let headers = build_headers(&cfg.access_key_id, &cfg.access_secret, &region, now, payload.as_bytes());
+    let headers = build_headers(
+        &cfg.access_key_id,
+        &cfg.access_secret,
+        &region,
+        now,
+        payload.as_bytes(),
+    );
 
     let url = format!("https://{TENCENT_SMS_HOST}/");
     crate::notify::check_target(&url)?;
@@ -264,7 +280,12 @@ mod tests {
         assert_eq!(sign_tc3("AKIDtest", "testsecret", now, payload), WANT);
 
         // 签名盖住请求体:body 变一个字节,Signature 段必须变(Credential 段不变)。
-        let other = sign_tc3("AKIDtest", "testsecret", now, br#"{"PhoneNumberSet":["+8613800138001"]}"#);
+        let other = sign_tc3(
+            "AKIDtest",
+            "testsecret",
+            now,
+            br#"{"PhoneNumberSet":["+8613800138001"]}"#,
+        );
         assert_ne!(other, WANT, "不同 payload 的签名必须不同");
         assert!(
             other.starts_with("TC3-HMAC-SHA256 Credential=AKIDtest/2025-10-15/sms/tc3_request"),
@@ -278,14 +299,26 @@ mod tests {
     /// 请求体与请求头:字段名对齐腾讯云 API,Authorization 由签名派生。
     #[test]
     fn test_build_payload_and_headers() {
-        let payload = build_payload("+8613800138000", "140000", "签名", "SMS_1", &["123456".to_string()]);
+        let payload = build_payload(
+            "+8613800138000",
+            "140000",
+            "签名",
+            "SMS_1",
+            &["123456".to_string()],
+        );
         let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(v["PhoneNumberSet"][0], "+8613800138000");
         assert_eq!(v["SmsSdkAppId"], "140000");
         assert_eq!(v["TemplateParamSet"][0], "123456");
 
         let now: i64 = 1_760_508_000;
-        let headers = build_headers("AKIDtest", "testsecret", "ap-guangzhou", now, payload.as_bytes());
+        let headers = build_headers(
+            "AKIDtest",
+            "testsecret",
+            "ap-guangzhou",
+            now,
+            payload.as_bytes(),
+        );
         let get = |name: &str| {
             headers
                 .iter()
@@ -298,7 +331,8 @@ mod tests {
         assert_eq!(get("X-TC-Version"), TENCENT_SMS_VERSION);
         assert_eq!(get("X-TC-Timestamp"), "1760508000");
         assert_eq!(get("X-TC-Region"), "ap-guangzhou");
-        assert!(get("Authorization").starts_with("TC3-HMAC-SHA256 Credential=AKIDtest/2025-10-15/sms/tc3_request"));
+        assert!(get("Authorization")
+            .starts_with("TC3-HMAC-SHA256 Credential=AKIDtest/2025-10-15/sms/tc3_request"));
     }
 
     /// 应答解析:API 级 Error、号码级 Code(ok 大小写敏感)、SerialNo 进回执。
@@ -330,8 +364,14 @@ mod tests {
         let err = parse_answer(200, r#"{"Response":{"RequestId":"r"}}"#).unwrap_err();
         assert!(err.to_string().contains("without SendStatusSet"));
         // HTTP 层失败 / 非 JSON
-        assert!(matches!(parse_answer(502, "bad gateway").unwrap_err(), NotifyError::Delivery(_)));
-        assert!(parse_answer(200, "<html/>").unwrap_err().to_string().contains("not JSON"));
+        assert!(matches!(
+            parse_answer(502, "bad gateway").unwrap_err(),
+            NotifyError::Delivery(_)
+        ));
+        assert!(parse_answer(200, "<html/>")
+            .unwrap_err()
+            .to_string()
+            .contains("not JSON"));
     }
 
     /// Host/Service/缺省 Region 钉死:TC3 签名串里含 Host 与 Service,漂移会全量签名失败。

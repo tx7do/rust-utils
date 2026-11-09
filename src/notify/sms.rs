@@ -66,7 +66,10 @@ impl SmsService {
                 )))
             }
         }
-        Ok(SmsService { agent: crate::notify::new_client(allow_private), cfg })
+        Ok(SmsService {
+            agent: crate::notify::new_client(allow_private),
+            cfg,
+        })
     }
 
     /// 配置自检:按服务商核对必填项,不拨号。
@@ -140,15 +143,20 @@ impl Service for SmsService {
         }
 
         // 目标错了没有"发到别家去"的软失败,也没碰过对端:归配置/目标类。
-        let (national, e164) = normalize_phone_number(&msg.target)
-            .map_err(NotifyError::NotConfigured)?;
+        let (national, e164) =
+            normalize_phone_number(&msg.target).map_err(NotifyError::NotConfigured)?;
 
         match self.cfg.provider.as_str() {
             PROVIDER_ALIYUN => {
                 aliyun::send(&self.agent, &self.cfg, &national, &msg.params)?;
             }
             PROVIDER_TENCENT => {
-                tencent::send(&self.agent, &self.cfg, &e164, &template_params_ordered(&msg.params))?;
+                tencent::send(
+                    &self.agent,
+                    &self.cfg,
+                    &e164,
+                    &template_params_ordered(&msg.params),
+                )?;
             }
             other => {
                 return Err(NotifyError::NotConfigured(format!(
@@ -191,24 +199,43 @@ mod tests {
         let mut tencent = full_cfg();
         tencent.provider = PROVIDER_TENCENT.into();
         tencent.app_id = String::new();
-        let err = SmsService::new(false, tencent.clone()).unwrap().precheck().unwrap_err();
+        let err = SmsService::new(false, tencent.clone())
+            .unwrap()
+            .precheck()
+            .unwrap_err();
         assert!(err.to_string().contains("sms_app_id"), "{err}");
         assert!(err.is_not_configured());
         tencent.app_id = "140000".into();
         tencent.region = String::new();
-        let err = SmsService::new(false, tencent).unwrap().precheck().unwrap_err();
+        let err = SmsService::new(false, tencent)
+            .unwrap()
+            .precheck()
+            .unwrap_err();
         assert!(err.to_string().contains("sms_region"), "{err}");
     }
 
     /// 对齐上游 TestNewRejectsUnknownProvider:服务商名拼错在构造期就报。
     #[test]
     fn test_new_rejects_unknown_provider() {
-        let err = SmsService::new(false, SmsConfig { provider: "SMSC".into(), ..Default::default() })
-            .unwrap_err();
+        let err = SmsService::new(
+            false,
+            SmsConfig {
+                provider: "SMSC".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
         assert!(err.is_not_configured());
         assert!(err.to_string().contains("unknown sms provider"));
 
-        let svc = SmsService::new(false, SmsConfig { provider: PROVIDER_ALIYUN.into(), ..Default::default() }).unwrap();
+        let svc = SmsService::new(
+            false,
+            SmsConfig {
+                provider: PROVIDER_ALIYUN.into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(Service::name(&svc), "sms");
     }
 
@@ -216,8 +243,14 @@ mod tests {
     /// 短信没有自由文本通道;目标为空同样在拨号之前拦下。
     #[test]
     fn test_send_rejects_before_dial() {
-        let svc = SmsService::new(false, SmsConfig { provider: PROVIDER_ALIYUN.into(), ..Default::default() })
-            .unwrap();
+        let svc = SmsService::new(
+            false,
+            SmsConfig {
+                provider: PROVIDER_ALIYUN.into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let err = svc.send(&Message::new("13800138000", "t")).unwrap_err();
         assert!(err.is_not_configured(), "{err}");
@@ -233,8 +266,14 @@ mod tests {
     /// 号码不合法一次都不碰对端:归配置/目标类,与上游语义一致。
     #[test]
     fn test_send_bad_phone_is_config_class() {
-        let svc = SmsService::new(false, SmsConfig { provider: PROVIDER_ALIYUN.into(), ..Default::default() })
-            .unwrap();
+        let svc = SmsService::new(
+            false,
+            SmsConfig {
+                provider: PROVIDER_ALIYUN.into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let err = svc
             .send(&Message::new("not-a-phone", "t").with_param("code", "1"))
             .unwrap_err();

@@ -32,7 +32,8 @@ use serde_json::{json, Map, Value};
 use sha2::Sha256;
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// CUSTOM 风格的签名头:对端用 Secret 按 `sha256=<hex(hmac("<timestamp>.", body))>` 复算比对。
@@ -176,8 +177,8 @@ fn sign_dingtalk(secret: &str, timestamp: &str) -> String {
 
 /// 飞书:base64(hmac_sha256(key="<s>\n<secret>", data=空))。
 fn sign_feishu(secret: &str, timestamp: &str) -> String {
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(format!("{timestamp}\n{secret}").as_bytes()).expect("hmac 接受任意长度密钥");
+    let mut mac = Hmac::<Sha256>::new_from_slice(format!("{timestamp}\n{secret}").as_bytes())
+        .expect("hmac 接受任意长度密钥");
     mac.update(b"");
     base64_standard(&mac.finalize().into_bytes())
 }
@@ -189,12 +190,20 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 /// 标准 base64(带 `=` 填充),用于签名向量与 Basic 认证。
 fn base64_standard(data: &[u8]) -> String {
-    base64_with(data, b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", true)
+    base64_with(
+        data,
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+        true,
+    )
 }
 
 /// URL 安全 base64(不带填充),用于随机 nonce(对齐 Go crand.Text 的形状)。
 fn base64_url_nopad(data: &[u8]) -> String {
-    base64_with(data, b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", false)
+    base64_with(
+        data,
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+        false,
+    )
 }
 
 fn base64_with(data: &[u8], table: &[u8; 64], padded: bool) -> String {
@@ -297,7 +306,10 @@ fn render_template(template: &str, vars: &HashMap<String, String>) -> Result<Str
         };
         let name = &after_open[..closing];
         let Some(value) = vars.get(name) else {
-            return Err(format!("payload template uses unsupported placeholder {{{{{}}}}}", name));
+            return Err(format!(
+                "payload template uses unsupported placeholder {{{{{}}}}}",
+                name
+            ));
         };
         out.push_str(&rest[..open]);
         out.push_str(value);
@@ -399,7 +411,8 @@ impl Service {
     /// 调用方在入队一次性消息(如验证码)之前先跑它,别等消息躺在队列里失败四次。
     pub fn precheck(&self) -> Result<(), NotifyError> {
         let style = self.style()?;
-        let probe = Message::new("https://precheck.invalid/hook", "precheck").with_content("precheck");
+        let probe =
+            Message::new("https://precheck.invalid/hook", "precheck").with_content("precheck");
         self.build_outbound(style, &probe).map(|_| ())
     }
 
@@ -485,8 +498,10 @@ impl Service {
         }
 
         if style == WebhookStyle::Custom && !self.cfg.secret.is_empty() {
-            rendered.signature_header =
-                format!("sha256={}", sign_webhook_body(&self.cfg.secret, &timestamp, &rendered.body));
+            rendered.signature_header = format!(
+                "sha256={}",
+                sign_webhook_body(&self.cfg.secret, &timestamp, &rendered.body)
+            );
         }
 
         Ok(rendered)
@@ -592,7 +607,9 @@ impl NotifyService for Service {
     /// 调用方据此与"拨过号被拒"的 [`NotifyError::Delivery`] 区分开。
     fn send(&self, msg: &Message) -> Result<Receipt, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("webhook target url is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "webhook target url is empty".into(),
+            ));
         }
 
         let out = self.build_request(msg)?;
@@ -620,7 +637,9 @@ pub fn normalize_url(raw: &str) -> Result<String, NotifyError> {
         }
     };
     if scheme != "http" && scheme != "https" {
-        return Err(NotifyError::NotConfigured(format!("webhook url {raw:?} must be http(s)")));
+        return Err(NotifyError::NotConfigured(format!(
+            "webhook url {raw:?} must be http(s)"
+        )));
     }
     let host = rest
         .split(['/', '?', '#'])
@@ -631,7 +650,9 @@ pub fn normalize_url(raw: &str) -> Result<String, NotifyError> {
         .unwrap_or("");
     let host = host.split(':').next().unwrap_or("");
     if host.is_empty() {
-        return Err(NotifyError::NotConfigured(format!("webhook url {raw:?} has no host")));
+        return Err(NotifyError::NotConfigured(format!(
+            "webhook url {raw:?} has no host"
+        )));
     }
     Ok(raw.to_string())
 }
@@ -649,7 +670,10 @@ fn read_body_limited(resp: ureq::Response, limit: usize) -> String {
 
 /// 非 2xx 状态的错误:带状态码与响应片段。
 fn status_error(status: u16, body: &str) -> NotifyError {
-    NotifyError::Delivery(format!("peer answered {status}: {}", truncate_snippet(body)))
+    NotifyError::Delivery(format!(
+        "peer answered {status}: {}",
+        truncate_snippet(body)
+    ))
 }
 
 /// 应答片段截断:进错误文案就够排障了,别把一整页 HTML 塞进去。
@@ -667,7 +691,9 @@ fn query_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => {
                 out.push('%');
@@ -774,7 +800,9 @@ fn check_provider_response(style: WebhookStyle, body: &str) -> Result<(), Notify
     if reason.is_empty() {
         reason = "no message";
     }
-    Err(NotifyError::Delivery(format!("peer answered 200 but {verdict}={code}: {reason}")))
+    Err(NotifyError::Delivery(format!(
+        "peer answered 200 but {verdict}={code}: {reason}"
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -879,7 +907,9 @@ mod tests {
         }
 
         // 大小写敏感:钉钉拼成小写也不能认,那会让"配置里写的是什么"与"发出去的是什么"分家。
-        for raw in ["custom", "DINGTAKL", "DingTalk", "dingtalk", "  FEISHU", "SMS"] {
+        for raw in [
+            "custom", "DINGTAKL", "DingTalk", "dingtalk", "  FEISHU", "SMS",
+        ] {
             let err = resolve_style(raw).unwrap_err();
             assert!(err.contains(raw), "{err} 要带上原值 {raw}");
             assert!(err.contains("CUSTOM / NONE"), "{err} 要说出可取值清单");
@@ -892,7 +922,11 @@ mod tests {
         assert_eq!(verdict_field_of(WebhookStyle::Wecom), "errcode");
         // 飞书的结论字段是 code/msg,不是 errcode。
         assert_eq!(verdict_field_of(WebhookStyle::Feishu), "code");
-        assert_eq!(verdict_field_of(WebhookStyle::Custom), "", "自有方案没有约定字段:只看状态码");
+        assert_eq!(
+            verdict_field_of(WebhookStyle::Custom),
+            "",
+            "自有方案没有约定字段:只看状态码"
+        );
         assert_eq!(verdict_field_of(WebhookStyle::None), "");
     }
 
@@ -903,18 +937,30 @@ mod tests {
     #[test]
     fn test_build_outbound_dingtalk() {
         let svc = style_service("DINGTALK", "", SECRET);
-        let out = svc.build_outbound(WebhookStyle::Dingtalk, &style_msg()).unwrap();
+        let out = svc
+            .build_outbound(WebhookStyle::Dingtalk, &style_msg())
+            .unwrap();
 
         assert!(out.timestamp_header.is_empty());
-        assert!(out.signature_header.is_empty(), "钉钉不签 body(签名只盖时间戳与密钥),所以没有签名头");
+        assert!(
+            out.signature_header.is_empty(),
+            "钉钉不签 body(签名只盖时间戳与密钥),所以没有签名头"
+        );
         assert_eq!(verdict_field_of(WebhookStyle::Dingtalk), "errcode");
 
         let (ts, sign) = out.dingtalk_query.as_ref().expect("钉钉要有 query 签名");
         // 毫秒:钉钉服务端按 ±1 小时窗口判过期,用秒会直接报"timestamp outside validity period"。
         let ms: i64 = ts.parse().expect("timestamp 是数字");
-        assert!(ms > 1_000_000_000_000, "必须是 13 位毫秒,10 位秒会被当成 1970 年");
+        assert!(
+            ms > 1_000_000_000_000,
+            "必须是 13 位毫秒,10 位秒会被当成 1970 年"
+        );
         assert!(ms < 10_000_000_000_000);
-        assert_eq!(sign_dingtalk(SECRET, ts), *sign, "query 里的 timestamp 与 sign 必须成对");
+        assert_eq!(
+            sign_dingtalk(SECRET, ts),
+            *sign,
+            "query 里的 timestamp 与 sign 必须成对"
+        );
 
         // 内置正文是 text 形状,标题与正文之间是 JSON 转义过的 \n。
         let body: Value = serde_json::from_str(&out.body).unwrap();
@@ -926,28 +972,46 @@ mod tests {
     #[test]
     fn test_build_outbound_dingtalk_unsigned() {
         let svc = style_service("DINGTALK", "", "");
-        let out = svc.build_outbound(WebhookStyle::Dingtalk, &style_msg()).unwrap();
+        let out = svc
+            .build_outbound(WebhookStyle::Dingtalk, &style_msg())
+            .unwrap();
 
-        assert!(out.dingtalk_query.is_none(), "签名一栏留空时不该往 URL 上拼 timestamp=&sign=");
+        assert!(
+            out.dingtalk_query.is_none(),
+            "签名一栏留空时不该往 URL 上拼 timestamp=&sign="
+        );
         json_eq(
             &out.body,
             r#"{"msgtype":"text","text":{"content":"重置验证码\n您的验证码是 123456"}}"#,
         );
-        assert_eq!(verdict_field_of(WebhookStyle::Dingtalk), "errcode", "判据是风格带的,跟签不签名无关");
+        assert_eq!(
+            verdict_field_of(WebhookStyle::Dingtalk),
+            "errcode",
+            "判据是风格带的,跟签不签名无关"
+        );
     }
 
     #[test]
     fn test_build_outbound_dingtalk_query_merge_preserves_token() {
         let svc = style_service("DINGTALK", "", SECRET);
-        let msg = Message::new("https://example.com/hook/?access_token=abc123", "t").with_content("c");
+        let msg =
+            Message::new("https://example.com/hook/?access_token=abc123", "t").with_content("c");
         let out = svc.build_request(&msg).unwrap();
 
         let pairs = query_pairs(&out.url);
         let get = |k: &str| pairs.iter().find(|(pk, _)| pk == k).map(|(_, v)| v.clone());
-        assert_eq!(get("access_token").as_deref(), Some("abc123"), "拼签名必须保留地址原有的参数");
+        assert_eq!(
+            get("access_token").as_deref(),
+            Some("abc123"),
+            "拼签名必须保留地址原有的参数"
+        );
         let ts = get("timestamp").expect("timestamp");
         assert_eq!(ts.chars().count(), 13, "钉钉要 13 位毫秒");
-        assert_eq!(get("sign").as_deref(), Some(sign_dingtalk(SECRET, &ts).as_str()), "签名与时间戳成对");
+        assert_eq!(
+            get("sign").as_deref(),
+            Some(sign_dingtalk(SECRET, &ts).as_str()),
+            "签名与时间戳成对"
+        );
         assert!(out.timestamp_header.is_empty());
         assert!(out.signature_header.is_empty(), "钉丁只认 query,不发签名头");
     }
@@ -955,7 +1019,9 @@ mod tests {
     #[test]
     fn test_build_outbound_feishu_envelope() {
         let svc = style_service("FEISHU", "", SECRET);
-        let out = svc.build_outbound(WebhookStyle::Feishu, &style_msg()).unwrap();
+        let out = svc
+            .build_outbound(WebhookStyle::Feishu, &style_msg())
+            .unwrap();
 
         assert!(out.dingtalk_query.is_none());
         assert!(out.signature_header.is_empty());
@@ -964,7 +1030,10 @@ mod tests {
         let envelope: Value = serde_json::from_str(&out.body).unwrap();
         let obj = envelope.as_object().unwrap();
         assert!(obj.contains_key("timestamp"));
-        assert!(obj.contains_key("sign"), "飞书把签名放正文顶层两个字段,不是请求头");
+        assert!(
+            obj.contains_key("sign"),
+            "飞书把签名放正文顶层两个字段,不是请求头"
+        );
 
         let ts = envelope["timestamp"].as_str().unwrap();
         assert_eq!(ts.chars().count(), 10, "飞书要 10 位秒时间戳");
@@ -972,7 +1041,10 @@ mod tests {
 
         // 并信封不许丢掉模板渲染出来的正文。
         assert_eq!(envelope["msg_type"], "text");
-        assert_eq!(envelope["content"]["text"], "重置验证码\n您的验证码是 123456");
+        assert_eq!(
+            envelope["content"]["text"],
+            "重置验证码\n您的验证码是 123456"
+        );
     }
 
     #[test]
@@ -989,7 +1061,9 @@ mod tests {
     #[test]
     fn test_build_outbound_wecom_unsigned() {
         let svc = style_service("WECOM", "", SECRET);
-        let out = svc.build_outbound(WebhookStyle::Wecom, &style_msg()).unwrap();
+        let out = svc
+            .build_outbound(WebhookStyle::Wecom, &style_msg())
+            .unwrap();
 
         assert!(out.dingtalk_query.is_none());
         assert!(out.signature_header.is_empty());
@@ -1003,30 +1077,55 @@ mod tests {
     #[test]
     fn test_build_outbound_custom_default_body() {
         let svc = style_service("CUSTOM", "", SECRET);
-        let out = svc.build_outbound(WebhookStyle::Custom, &style_msg()).unwrap();
+        let out = svc
+            .build_outbound(WebhookStyle::Custom, &style_msg())
+            .unwrap();
 
-        assert_eq!(verdict_field_of(WebhookStyle::Custom), "", "自有方案没约定判据字段:只看状态码");
+        assert_eq!(
+            verdict_field_of(WebhookStyle::Custom),
+            "",
+            "自有方案没约定判据字段:只看状态码"
+        );
 
         let parsed: Value = serde_json::from_str(&out.body).unwrap();
         assert_eq!(parsed["title"], "重置验证码");
         assert_eq!(parsed["content"], "您的验证码是 123456");
         assert!(parsed.get("delivered_at").is_some());
-        assert_eq!(parsed.as_object().unwrap().len(), 3, "默认正文就三个字段:业务扩展字段归钩子");
-        assert!(parsed["delivered_at"].is_string(), "delivered_at 是 RFC3339 字符串");
+        assert_eq!(
+            parsed.as_object().unwrap().len(),
+            3,
+            "默认正文就三个字段:业务扩展字段归钩子"
+        );
+        assert!(
+            parsed["delivered_at"].is_string(),
+            "delivered_at 是 RFC3339 字符串"
+        );
 
         // 时间戳进头、签名覆盖"时间戳.正文":头里的 ts 必须就是签名里那个。
-        assert_eq!(out.timestamp_header.chars().count(), 10, "CUSTOM 用秒时间戳");
+        assert_eq!(
+            out.timestamp_header.chars().count(),
+            10,
+            "CUSTOM 用秒时间戳"
+        );
         assert!(!out.signature_header.is_empty());
         let recomputed = sign_webhook_body(SECRET, &out.timestamp_header, &out.body);
-        assert_eq!(out.signature_header, format!("sha256={recomputed}"),
-            "签名必须在正文定型之后算:先签再渲染会让对端复算永远对不上");
+        assert_eq!(
+            out.signature_header,
+            format!("sha256={recomputed}"),
+            "签名必须在正文定型之后算:先签再渲染会让对端复算永远对不上"
+        );
     }
 
     #[test]
     fn test_build_outbound_custom_unsigned() {
         let svc = style_service("CUSTOM", "", "");
-        let out = svc.build_outbound(WebhookStyle::Custom, &style_msg()).unwrap();
-        assert!(out.signature_header.is_empty(), "没有密钥却发一个空签名头,对端会拿它和自己的 HMAC 比");
+        let out = svc
+            .build_outbound(WebhookStyle::Custom, &style_msg())
+            .unwrap();
+        assert!(
+            out.signature_header.is_empty(),
+            "没有密钥却发一个空签名头,对端会拿它和自己的 HMAC 比"
+        );
     }
 
     #[test]
@@ -1034,13 +1133,18 @@ mod tests {
         // NONE 只管"不签名",正文仍要有默认形状——内置模板表只登记了三家机器人,
         // NONE 不填模板若渲染出空正文,报出来的是"不是合法 JSON",看不出真正原因。
         let svc = style_service("NONE", "", SECRET);
-        let out = svc.build_outbound(WebhookStyle::None, &style_msg()).unwrap();
+        let out = svc
+            .build_outbound(WebhookStyle::None, &style_msg())
+            .unwrap();
 
         let parsed: Value = serde_json::from_str(&out.body).expect("NONE 不填模板也要出合法 JSON");
         assert_eq!(parsed["title"], "重置验证码");
 
         assert!(out.dingtalk_query.is_none());
-        assert!(out.signature_header.is_empty(), "NONE 配了密钥也不签:这一列的语义就是\"什么都不带\"");
+        assert!(
+            out.signature_header.is_empty(),
+            "NONE 配了密钥也不签:这一列的语义就是\"什么都不带\""
+        );
         assert_eq!(verdict_field_of(WebhookStyle::None), "");
     }
 
@@ -1062,7 +1166,9 @@ mod tests {
             },
         );
 
-        let out = svc.build_outbound(WebhookStyle::Custom, &style_msg()).unwrap();
+        let out = svc
+            .build_outbound(WebhookStyle::Custom, &style_msg())
+            .unwrap();
         // 钩子经 serde 原样出站:字段类型归调用方(数字就是数字)。
         json_eq(
             &out.body,
@@ -1081,7 +1187,9 @@ mod tests {
                 ..Config::default()
             },
         );
-        let err = svc.build_outbound(WebhookStyle::Custom, &style_msg()).unwrap_err();
+        let err = svc
+            .build_outbound(WebhookStyle::Custom, &style_msg())
+            .unwrap_err();
         assert!(err.is_not_configured());
         assert!(err.to_string().contains("default payload: hook 炸了"));
         assert!(err.to_string().contains("channel [7]"));
@@ -1098,17 +1206,23 @@ mod tests {
         msg.content = "正文里有 \t 制表符".to_string() + "\"结束\"";
         msg.params.insert("uid".into(), "1024".into());
         msg.params.insert("rid".into(), "7".into());
-        msg.params.insert("event_type".into(), "PASSWORD_RESET_CODE".into());
+        msg.params
+            .insert("event_type".into(), "PASSWORD_RESET_CODE".into());
 
-        let template =
-            r#"{"t":"{{title}}","c":"{{content}}","uid":{{uid}},"rid":{{rid}},"e":"{{event_type}}","n":"{{nonce}}"}"#;
+        let template = r#"{"t":"{{title}}","c":"{{content}}","uid":{{uid}},"rid":{{rid}},"e":"{{event_type}}","n":"{{nonce}}"}"#;
         let svc = style_service("NONE", template, "");
         let out = svc.build_outbound(WebhookStyle::None, &msg).unwrap();
 
         let raw = out.body.clone();
-        assert!(raw.contains("<尖括号>"), "中文正文里的 < > & 不该变成 \\u003c");
+        assert!(
+            raw.contains("<尖括号>"),
+            "中文正文里的 < > & 不该变成 \\u003c"
+        );
         assert!(raw.contains('&'), "同上");
-        assert!(raw.contains("\"uid\":1024"), "Params 值按 JSON 字符串内容转义:纯数字可以裸放");
+        assert!(
+            raw.contains("\"uid\":1024"),
+            "Params 值按 JSON 字符串内容转义:纯数字可以裸放"
+        );
         assert!(raw.contains("\"rid\":7"));
 
         let parsed: Value = serde_json::from_str(&out.body).unwrap();
@@ -1132,8 +1246,10 @@ mod tests {
         let out = svc.build_outbound(WebhookStyle::None, &msg).unwrap();
 
         let parsed: Value = serde_json::from_str(&out.body).unwrap();
-        assert_eq!(parsed["t"], "{{content}}",
-            "逐变量替换会让 {{title}} 的值里的 {{content}} 被后一轮替换掉:单趟扫描每个值只出现一次");
+        assert_eq!(
+            parsed["t"], "{{content}}",
+            "逐变量替换会让 {{title}} 的值里的 {{content}} 被后一轮替换掉:单趟扫描每个值只出现一次"
+        );
     }
 
     #[test]
@@ -1144,19 +1260,49 @@ mod tests {
             want_cause: &'static str,
         }
         let cases = [
-            Case { style: "CUSTOM", template: r#"{"t":"{{contnet}}"}"#, want_cause: "unsupported placeholder {{contnet}}" },
+            Case {
+                style: "CUSTOM",
+                template: r#"{"t":"{{contnet}}"}"#,
+                want_cause: "unsupported placeholder {{contnet}}",
+            },
             // CUSTOM 的签名盖住正文,正文里引用 {{sign}} 是循环,必须报错。
-            Case { style: "CUSTOM", template: r#"{"t":"{{title}}","s":"{{sign}}"}"#, want_cause: "unsupported placeholder {{sign}}" },
-            Case { style: "FEISHU", template: "通知:{{title}}", want_cause: "rendered invalid JSON" },
-            Case { style: "WECOM", template: r#"{"t":"{{title}}}"#, want_cause: "rendered invalid JSON" },
+            Case {
+                style: "CUSTOM",
+                template: r#"{"t":"{{title}}","s":"{{sign}}"}"#,
+                want_cause: "unsupported placeholder {{sign}}",
+            },
+            Case {
+                style: "FEISHU",
+                template: "通知:{{title}}",
+                want_cause: "rendered invalid JSON",
+            },
+            Case {
+                style: "WECOM",
+                template: r#"{"t":"{{title}}}"#,
+                want_cause: "rendered invalid JSON",
+            },
         ];
 
         for c in &cases {
             let svc = style_service(c.style, c.template, "");
-            let err = svc.build_outbound(resolve_style(c.style).unwrap(), &style_msg()).unwrap_err();
-            assert!(err.is_not_configured(), "{}: 配置错重试也不会变好", c.want_cause);
-            assert!(err.to_string().contains(c.want_cause), "{}: {err}", c.want_cause);
-            assert!(err.to_string().contains("channel [7]"), "{}: 报错要带配置标识", c.want_cause);
+            let err = svc
+                .build_outbound(resolve_style(c.style).unwrap(), &style_msg())
+                .unwrap_err();
+            assert!(
+                err.is_not_configured(),
+                "{}: 配置错重试也不会变好",
+                c.want_cause
+            );
+            assert!(
+                err.to_string().contains(c.want_cause),
+                "{}: {err}",
+                c.want_cause
+            );
+            assert!(
+                err.to_string().contains("channel [7]"),
+                "{}: 报错要带配置标识",
+                c.want_cause
+            );
             assert_eq!(
                 err.to_string().matches("webhook: ").count(),
                 1,
@@ -1187,11 +1333,22 @@ mod tests {
             ("NONE", "", ""),
             ("DINGTALK", "", "k"),
             ("DINGTALK", "", ""),
-            ("FEISHU", r#"{"msg_type":"text","content":{"text":"{{title}}"},"s":"{{sign}}"}"#, "k"),
-            ("WECOM", r#"{"msgtype":"text","text":{"content":"{{content}}"}}"#, ""),
+            (
+                "FEISHU",
+                r#"{"msg_type":"text","content":{"text":"{{title}}"},"s":"{{sign}}"}"#,
+                "k",
+            ),
+            (
+                "WECOM",
+                r#"{"msgtype":"text","text":{"content":"{{content}}"}}"#,
+                "",
+            ),
         ] {
             let svc = style_service(style, template, secret);
-            assert!(svc.precheck().is_ok(), "style={style:?} template={template:?}");
+            assert!(
+                svc.precheck().is_ok(),
+                "style={style:?} template={template:?}"
+            );
         }
 
         let broken = [
@@ -1205,14 +1362,23 @@ mod tests {
         for (style, template, secret) in broken {
             let svc = style_service(style, template, secret);
             let err = svc.precheck().unwrap_err();
-            assert!(err.is_not_configured(), "style={style:?}: 配置错属\"没发出去且重试无用\"");
+            assert!(
+                err.is_not_configured(),
+                "style={style:?}: 配置错属\"没发出去且重试无用\""
+            );
             assert!(err.to_string().contains("channel [7]"));
         }
     }
 
     #[test]
     fn test_normalize_url() {
-        for bad in ["", "/hooks/1", "//127.0.0.1/x", "ftp://example.com/x", "not a url"] {
+        for bad in [
+            "",
+            "/hooks/1",
+            "//127.0.0.1/x",
+            "ftp://example.com/x",
+            "not a url",
+        ] {
             let err = normalize_url(bad).unwrap_err();
             assert!(err.is_not_configured(), "{bad:?} 不该放行");
         }
@@ -1280,18 +1446,78 @@ mod tests {
             want_error: &'static str,
         }
         let cases = [
-            Case { name: "dingtalk rejected", style: WebhookStyle::Dingtalk, body: r#"{"errcode":310000,"errmsg":"keywords not in content"}"#, want_error: "errcode=310000" },
-            Case { name: "dingtalk ok", style: WebhookStyle::Dingtalk, body: r#"{"errcode":0,"errmsg":"ok"}"#, want_error: "" },
-            Case { name: "dingtalk ignores feishu field", style: WebhookStyle::Dingtalk, body: r#"{"code":19021}"#, want_error: "" },
-            Case { name: "wecom rejected", style: WebhookStyle::Wecom, body: r#"{"errcode":93000,"errmsg":"invalid webhook k"}"#, want_error: "invalid webhook k" },
-            Case { name: "feishu rejected", style: WebhookStyle::Feishu, body: r#"{"code":19021,"msg":"sign match fail"}"#, want_error: "code=19021" },
-            Case { name: "feishu ok", style: WebhookStyle::Feishu, body: r#"{"code":0,"msg":"success"}"#, want_error: "" },
-            Case { name: "custom looks nowhere but status", style: WebhookStyle::Custom, body: r#"{"errcode":310000}"#, want_error: "" },
-            Case { name: "none same", style: WebhookStyle::None, body: r#"{"errcode":310000}"#, want_error: "" },
-            Case { name: "html answer is not guessed", style: WebhookStyle::Dingtalk, body: "<html>502 Bad Gateway</html>", want_error: "" },
-            Case { name: "empty body", style: WebhookStyle::Dingtalk, body: "", want_error: "" },
-            Case { name: "json array", style: WebhookStyle::Dingtalk, body: "[]", want_error: "" },
-            Case { name: "missing verdict field", style: WebhookStyle::Feishu, body: r#"{"msg":"failed"}"#, want_error: "" },
+            Case {
+                name: "dingtalk rejected",
+                style: WebhookStyle::Dingtalk,
+                body: r#"{"errcode":310000,"errmsg":"keywords not in content"}"#,
+                want_error: "errcode=310000",
+            },
+            Case {
+                name: "dingtalk ok",
+                style: WebhookStyle::Dingtalk,
+                body: r#"{"errcode":0,"errmsg":"ok"}"#,
+                want_error: "",
+            },
+            Case {
+                name: "dingtalk ignores feishu field",
+                style: WebhookStyle::Dingtalk,
+                body: r#"{"code":19021}"#,
+                want_error: "",
+            },
+            Case {
+                name: "wecom rejected",
+                style: WebhookStyle::Wecom,
+                body: r#"{"errcode":93000,"errmsg":"invalid webhook k"}"#,
+                want_error: "invalid webhook k",
+            },
+            Case {
+                name: "feishu rejected",
+                style: WebhookStyle::Feishu,
+                body: r#"{"code":19021,"msg":"sign match fail"}"#,
+                want_error: "code=19021",
+            },
+            Case {
+                name: "feishu ok",
+                style: WebhookStyle::Feishu,
+                body: r#"{"code":0,"msg":"success"}"#,
+                want_error: "",
+            },
+            Case {
+                name: "custom looks nowhere but status",
+                style: WebhookStyle::Custom,
+                body: r#"{"errcode":310000}"#,
+                want_error: "",
+            },
+            Case {
+                name: "none same",
+                style: WebhookStyle::None,
+                body: r#"{"errcode":310000}"#,
+                want_error: "",
+            },
+            Case {
+                name: "html answer is not guessed",
+                style: WebhookStyle::Dingtalk,
+                body: "<html>502 Bad Gateway</html>",
+                want_error: "",
+            },
+            Case {
+                name: "empty body",
+                style: WebhookStyle::Dingtalk,
+                body: "",
+                want_error: "",
+            },
+            Case {
+                name: "json array",
+                style: WebhookStyle::Dingtalk,
+                body: "[]",
+                want_error: "",
+            },
+            Case {
+                name: "missing verdict field",
+                style: WebhookStyle::Feishu,
+                body: r#"{"msg":"failed"}"#,
+                want_error: "",
+            },
         ];
 
         for c in &cases {
@@ -1299,9 +1525,17 @@ mod tests {
                 Ok(()) => assert!(c.want_error.is_empty(), "{}: 不该报错", c.name),
                 Err(err) => {
                     assert!(!c.want_error.is_empty(), "{}: 该报错", c.name);
-                    assert!(err.to_string().contains("peer answered 200"), "{}: {err}", c.name);
+                    assert!(
+                        err.to_string().contains("peer answered 200"),
+                        "{}: {err}",
+                        c.name
+                    );
                     assert!(err.to_string().contains(c.want_error), "{}: {err}", c.name);
-                    assert!(!err.is_not_configured(), "{}: 拨过号被拒 = 投递失败,不该按配置失败记账", c.name);
+                    assert!(
+                        !err.is_not_configured(),
+                        "{}: 拨过号被拒 = 投递失败,不该按配置失败记账",
+                        c.name
+                    );
                 }
             }
         }
@@ -1313,7 +1547,10 @@ mod tests {
 
         let long = "a".repeat(MAX_RESPONSE_BYTES + 100);
         let got = truncate_for_error(&long);
-        assert_eq!(got.chars().count(), MAX_RESPONSE_BYTES + "…".chars().count());
+        assert_eq!(
+            got.chars().count(),
+            MAX_RESPONSE_BYTES + "…".chars().count()
+        );
         assert!(got.ends_with('…'));
     }
 
@@ -1330,7 +1567,13 @@ mod tests {
         assert_eq!(json_escape_string("中文"), "中文");
 
         // 转义结果必须能原样嵌进引号里再解回来——这是"引号归模板作者"这一设计的成立前提。
-        for raw in [r#"带"引号""#, "换行\n与\t制表", r"反斜杠\", r#"<a href="x">&"#, "中文"] {
+        for raw in [
+            r#"带"引号""#,
+            "换行\n与\t制表",
+            r"反斜杠\",
+            r#"<a href="x">&"#,
+            "中文",
+        ] {
             let want = json!({ "v": raw }).to_string();
             let built = format!(r#"{{"v":"{}"}}"#, json_escape_string(raw));
             json_eq(&built, &want);
@@ -1340,13 +1583,22 @@ mod tests {
     #[test]
     fn test_merge_query() {
         assert_eq!(
-            merge_query("https://qyapi.example.com/cgi?access_token=abc&b=2", &[("timestamp", "1"), ("sign", "a+b")]),
+            merge_query(
+                "https://qyapi.example.com/cgi?access_token=abc&b=2",
+                &[("timestamp", "1"), ("sign", "a+b")]
+            ),
             "https://qyapi.example.com/cgi?access_token=abc&b=2&sign=a%2Bb&timestamp=1",
             "原有参数保留、新键追加、按键名排序重编"
         );
-        assert_eq!(merge_query("https://e.com/x", &[("k", "v")]), "https://e.com/x?k=v");
+        assert_eq!(
+            merge_query("https://e.com/x", &[("k", "v")]),
+            "https://e.com/x?k=v"
+        );
         // 同名键覆盖
-        assert_eq!(merge_query("https://e.com/x?k=old", &[("k", "new")]), "https://e.com/x?k=new");
+        assert_eq!(
+            merge_query("https://e.com/x?k=old", &[("k", "new")]),
+            "https://e.com/x?k=new"
+        );
     }
 
     #[test]

@@ -10,9 +10,9 @@
 //!
 //! 测试离线进行:请求构造与回执解析拆成纯函数断言,不真实连网。
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Postmark 官方 API 域。
 pub const DEFAULT_API_BASE: &str = "https://api.postmarkapp.com";
@@ -67,7 +67,9 @@ impl Service {
     /// (配了消息流才带 MessageStream 字段)。
     fn build_request(&self, msg: &Message) -> Result<Prepared, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("postmark recipient is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "postmark recipient is empty".into(),
+            ));
         }
         if self.cfg.server_token.is_empty() || self.cfg.from.is_empty() {
             return Err(NotifyError::NotConfigured(
@@ -75,7 +77,9 @@ impl Service {
             ));
         }
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("postmark message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "postmark message body is empty".into(),
+            ));
         }
         let stream = if self.cfg.message_stream.is_empty() {
             None
@@ -123,13 +127,19 @@ impl Service {
             NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
         })?;
         if answer.error_code != 0 {
-            let message = if answer.message.is_empty() { "no message" } else { &answer.message };
+            let message = if answer.message.is_empty() {
+                "no message"
+            } else {
+                &answer.message
+            };
             return Err(NotifyError::Delivery(format!(
                 "peer answered error_code={}: {message}",
                 answer.error_code
             )));
         }
-        Ok(Receipt { provider_id: answer.message_id })
+        Ok(Receipt {
+            provider_id: answer.message_id,
+        })
     }
 
     /// POST 已构造好的请求,返回 (状态码, 应答文本)。
@@ -237,12 +247,15 @@ mod tests {
         let svc = Service::new(full_cfg());
         let req = svc
             .build_request(
-                &Message::new("alice@example.com", "重置验证码").with_content("您的验证码是 123456"),
+                &Message::new("alice@example.com", "重置验证码")
+                    .with_content("您的验证码是 123456"),
             )
             .unwrap();
         assert_eq!(req.url, "https://api.postmarkapp.com/email");
         assert_eq!(req.content_type, "application/json");
-        assert!(req.headers.contains(&("Accept", "application/json".to_string())));
+        assert!(req
+            .headers
+            .contains(&("Accept", "application/json".to_string())));
         assert_eq!(
             req.headers[0],
             ("X-Postmark-Server-Token", "st-1".to_string()),
@@ -284,10 +297,15 @@ mod tests {
             .send(&Message::new("a@b.c", "t").with_content("c"))
             .unwrap_err();
         assert!(err.is_not_configured(), "{err}");
-        assert!(err.to_string().contains("server_token/from required"), "{err}");
+        assert!(
+            err.to_string().contains("server_token/from required"),
+            "{err}"
+        );
 
         let svc = Service::new(full_cfg());
-        let err = svc.send(&Message::new("", "t").with_content("c")).unwrap_err();
+        let err = svc
+            .send(&Message::new("", "t").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured(), "{err}");
         assert!(err.to_string().contains("recipient is empty"), "{err}");
 
@@ -314,7 +332,13 @@ mod tests {
     // build_payload 纯函数:MessageStream 只有配了才出现。
     #[test]
     fn test_build_payload() {
-        let base = build_payload("noreply@example.com", "alice@example.com", "重置验证码", "您的验证码是 123456", None);
+        let base = build_payload(
+            "noreply@example.com",
+            "alice@example.com",
+            "重置验证码",
+            "您的验证码是 123456",
+            None,
+        );
         assert_eq!(
             base,
             json!({
@@ -338,9 +362,14 @@ mod tests {
             r#"{"To":"alice@example.com","SubmittedAt":"2026-10-15","MessageID":"1234567","ErrorCode":0,"Message":"OK"}"#,
         )
         .unwrap();
-        assert_eq!(receipt.provider_id, "1234567", "Postmark 的 MessageID 要进回执");
+        assert_eq!(
+            receipt.provider_id, "1234567",
+            "Postmark 的 MessageID 要进回执"
+        );
 
-        let err = Service::parse_answer(200, r#"{"ErrorCode":401,"Message":"Invalid API Request"}"#).unwrap_err();
+        let err =
+            Service::parse_answer(200, r#"{"ErrorCode":401,"Message":"Invalid API Request"}"#)
+                .unwrap_err();
         assert!(matches!(err, NotifyError::Delivery(_)), "{err}");
         assert!(err.to_string().contains("error_code=401"), "{err}");
 

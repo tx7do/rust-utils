@@ -14,7 +14,8 @@ use std::io::Read;
 use serde_json::{json, Value};
 
 use crate::notify::{
-    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt, Service as NotifyService,
+    check_target, map_ureq_error, new_client, Message, NotifyError, Receipt,
+    Service as NotifyService,
 };
 
 /// 应答读取上限。
@@ -105,8 +106,9 @@ impl Service {
     /// 解析 2xx 应答:event_id 缺失即失败(Matrix 也会在 2xx 里回 MatrixError 的情况少见,
     /// 但按上游口径:非 JSON 照实报,缺 event_id 带 errcode 报)。
     fn parse_response(&self, body: &str) -> Result<Receipt, NotifyError> {
-        let answer: Value = serde_json::from_str(body)
-            .map_err(|_| NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body))))?;
+        let answer: Value = serde_json::from_str(body).map_err(|_| {
+            NotifyError::Delivery(format!("peer answer is not JSON: {}", snippet(body)))
+        })?;
         let event_id = answer.get("event_id").and_then(Value::as_str).unwrap_or("");
         if event_id.is_empty() {
             let errcode = answer.get("errcode").and_then(Value::as_str).unwrap_or("");
@@ -114,9 +116,13 @@ impl Service {
             if error.is_empty() {
                 error = "no event_id";
             }
-            return Err(NotifyError::Delivery(format!("peer answered errcode={errcode}: {error}")));
+            return Err(NotifyError::Delivery(format!(
+                "peer answered errcode={errcode}: {error}"
+            )));
         }
-        Ok(Receipt { provider_id: event_id.to_string() })
+        Ok(Receipt {
+            provider_id: event_id.to_string(),
+        })
     }
 
     /// 处理一个已拿到的响应:状态码判门,2xx 之后才轮到 body 说话。
@@ -164,7 +170,10 @@ impl NotifyService for Service {
 /// 房间 ID 进 URL 路径段:`!` 与 `:` 是路径合法字符,通用转义不会动它们,
 /// 而 Matrix 规范要求显式转义(`%21` / `%3A`);`%` 先转义避免二次解释。
 fn room_id_path(room_id: &str) -> String {
-    room_id.replace('%', "%25").replace('!', "%21").replace(':', "%3A")
+    room_id
+        .replace('%', "%25")
+        .replace('!', "%21")
+        .replace(':', "%3A")
 }
 
 /// 会话内唯一的事务 ID(16 随机字节的 URL 安全 base64,无填充)。
@@ -225,7 +234,9 @@ fn query_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => {
                 out.push('%');
@@ -248,21 +259,35 @@ mod tests {
     fn service() -> Service {
         Service::new(
             true,
-            Config { ref_: "7".into(), server_url: "https://matrix.example/".into(), access_token: "syt-1".into() },
+            Config {
+                ref_: "7".into(),
+                server_url: "https://matrix.example/".into(),
+                access_token: "syt-1".into(),
+            },
         )
     }
 
     #[test]
     fn test_missing_config_is_not_configured() {
-        let svc = Service::new(true, Config { server_url: "https://example.org".into(), ..Config::default() });
+        let svc = Service::new(
+            true,
+            Config {
+                server_url: "https://example.org".into(),
+                ..Config::default()
+            },
+        );
         assert_eq!(svc.name(), "matrix");
-        let err = svc.build_request(&Message::new("!r:s.org", "").with_content("c")).unwrap_err();
+        let err = svc
+            .build_request(&Message::new("!r:s.org", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
     #[test]
     fn test_empty_room_is_not_configured() {
-        let err = service().send(&Message::new("", "").with_content("c")).unwrap_err();
+        let err = service()
+            .send(&Message::new("", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured());
     }
 
@@ -270,18 +295,27 @@ mod tests {
     fn test_build_request_event_put() {
         let svc = service();
         let out = svc
-            .build_request(&Message::new("!room:example.org", "部署完成").with_content("v1.2.0 已上线"))
+            .build_request(
+                &Message::new("!room:example.org", "部署完成").with_content("v1.2.0 已上线"),
+            )
             .unwrap();
 
         assert_eq!(out.method, "PUT", "事务发送是 PUT(txnId 幂等)");
         assert!(
-            out.url.starts_with("https://matrix.example/_matrix/client/v3/rooms/%21room%3Aexample.org/send/m.text/"),
+            out.url.starts_with(
+                "https://matrix.example/_matrix/client/v3/rooms/%21room%3Aexample.org/send/m.text/"
+            ),
             "房间 ID 要 URL 转义进路径(! 和 : 是保留字): {}",
             out.url
         );
         assert!(out.url.contains("access_token=syt-1"), "token 走 query");
         // 事务 ID 段是 22 字符的 URL 安全 base64。
-        let txn = out.url.split("/send/m.text/").nth(1).and_then(|s| s.split('?').next()).unwrap();
+        let txn = out
+            .url
+            .split("/send/m.text/")
+            .nth(1)
+            .and_then(|s| s.split('?').next())
+            .unwrap();
         assert_eq!(txn.len(), 22, "16 字节 → 22 字符无填充: {txn}");
 
         let payload: Value = serde_json::from_str(&out.body).unwrap();
@@ -292,26 +326,46 @@ mod tests {
     #[test]
     fn test_txn_id_differs_per_send() {
         let svc = service();
-        let a = svc.build_request(&Message::new("!r:s.org", "").with_content("c")).unwrap();
-        let b = svc.build_request(&Message::new("!r:s.org", "").with_content("c")).unwrap();
+        let a = svc
+            .build_request(&Message::new("!r:s.org", "").with_content("c"))
+            .unwrap();
+        let b = svc
+            .build_request(&Message::new("!r:s.org", "").with_content("c"))
+            .unwrap();
         assert_ne!(a.url, b.url, "每次发送换事务 ID,重复发送靠它去重");
     }
 
     #[test]
     fn test_send_blocked_target() {
-        let svc = Service::new(false, Config { server_url: "http://127.0.0.1:1".into(), access_token: "t".into(), ..Config::default() });
-        let err = svc.send(&Message::new("!r:s.org", "").with_content("c")).unwrap_err();
+        let svc = Service::new(
+            false,
+            Config {
+                server_url: "http://127.0.0.1:1".into(),
+                access_token: "t".into(),
+                ..Config::default()
+            },
+        );
+        let err = svc
+            .send(&Message::new("!r:s.org", "").with_content("c"))
+            .unwrap_err();
         assert!(err.is_blocked_target(), "{err}");
     }
 
     #[test]
     fn test_parse_response_event_id() {
         let svc = service();
-        let receipt = svc.parse_response(r#"{"event_id":"$abc123:example.org"}"#).unwrap();
-        assert_eq!(receipt.provider_id, "$abc123:example.org", "event_id 要进回执");
+        let receipt = svc
+            .parse_response(r#"{"event_id":"$abc123:example.org"}"#)
+            .unwrap();
+        assert_eq!(
+            receipt.provider_id, "$abc123:example.org",
+            "event_id 要进回执"
+        );
 
         // 缺 event_id 即失败,带 errcode。
-        let err = svc.parse_response(r#"{"errcode":"M_UNKNOWN","error":"boom"}"#).unwrap_err();
+        let err = svc
+            .parse_response(r#"{"errcode":"M_UNKNOWN","error":"boom"}"#)
+            .unwrap_err();
         assert!(err.to_string().contains("errcode=M_UNKNOWN"), "{err}");
 
         // 全缺兜底"no event_id"。
@@ -326,7 +380,10 @@ mod tests {
     #[test]
     fn test_matrix_error_body_in_status_error() {
         // 403 + M_FORBIDDEN:走状态码分支,JSON 片段进错误文案(上游口径)。
-        let err = status_error(403, r#"{"errcode":"M_FORBIDDEN","error":"You are not in the room"}"#);
+        let err = status_error(
+            403,
+            r#"{"errcode":"M_FORBIDDEN","error":"You are not in the room"}"#,
+        );
         assert!(err.to_string().contains("403"), "{err}");
         assert!(err.to_string().contains("M_FORBIDDEN"));
         assert!(!err.is_not_configured(), "拨过号被拒 = 投递失败");

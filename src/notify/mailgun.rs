@@ -10,7 +10,7 @@
 //!
 //! 测试离线进行:请求构造、Basic Auth 与回执解析拆成纯函数断言,不真实连网。
 
-use crate::notify::{Message, NotifyError, Receipt, check_target, map_ureq_error, new_client};
+use crate::notify::{check_target, map_ureq_error, new_client, Message, NotifyError, Receipt};
 
 /// Mailgun 官方 API 域(欧盟租户覆写 `https://api.eu.mailgun.net`)。
 pub const DEFAULT_API_BASE: &str = "https://api.mailgun.net";
@@ -65,7 +65,9 @@ impl Service {
     /// 表单字段 from/to/subject/text。
     fn build_request(&self, msg: &Message) -> Result<Prepared, NotifyError> {
         if msg.target.is_empty() {
-            return Err(NotifyError::NotConfigured("mailgun recipient is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "mailgun recipient is empty".into(),
+            ));
         }
         if self.cfg.domain.is_empty() || self.cfg.api_key.is_empty() {
             return Err(NotifyError::NotConfigured(
@@ -73,7 +75,9 @@ impl Service {
             ));
         }
         if msg.content.is_empty() {
-            return Err(NotifyError::NotConfigured("mailgun message body is empty".into()));
+            return Err(NotifyError::NotConfigured(
+                "mailgun message body is empty".into(),
+            ));
         }
         Ok(Prepared {
             url: format!(
@@ -88,7 +92,10 @@ impl Service {
                 ("text".to_string(), msg.content.clone()),
             ]),
             content_type: "application/x-www-form-urlencoded",
-            headers: vec![("Authorization", basic_auth(AUTH_USERNAME, &self.cfg.api_key))],
+            headers: vec![(
+                "Authorization",
+                basic_auth(AUTH_USERNAME, &self.cfg.api_key),
+            )],
         })
     }
 
@@ -107,7 +114,9 @@ impl Service {
             id: String,
         }
         let answer: Answer = serde_json::from_str(body).unwrap_or_default();
-        Ok(Receipt { provider_id: answer.id })
+        Ok(Receipt {
+            provider_id: answer.id,
+        })
     }
 
     /// POST 已构造好的请求,返回 (状态码, 应答文本)。
@@ -149,13 +158,20 @@ impl crate::notify::Service for Service {
 
 /// HTTP Basic 鉴权头值:`Basic base64(user:password)`。
 pub fn basic_auth(user: &str, password: &str) -> String {
-    format!("Basic {}", base64_encode(format!("{user}:{password}").as_bytes()))
+    format!(
+        "Basic {}",
+        base64_encode(format!("{user}:{password}").as_bytes())
+    )
 }
 
 /// messages 端点:基地址去尾部斜杠后拼 `/v3/{domain}/messages`,
 /// 域名经路径段转义(Go `url.PathEscape` 语义)。
 pub fn endpoint(api_base: &str, domain: &str) -> String {
-    format!("{}/v3/{}/messages", api_base.trim_end_matches('/'), path_escape(domain))
+    format!(
+        "{}/v3/{}/messages",
+        api_base.trim_end_matches('/'),
+        path_escape(domain)
+    )
 }
 
 /// 构造 messages 表单体,可独立测试的纯函数。
@@ -205,8 +221,21 @@ fn path_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~'
-            | b'$' | b'&' | b'+' | b',' | b';' | b'=' | b':' | b'@' => out.push(b as char),
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~'
+            | b'$'
+            | b'&'
+            | b'+'
+            | b','
+            | b';'
+            | b'='
+            | b':'
+            | b'@' => out.push(b as char),
             _ => {
                 out.push('%');
                 out.push(HEX[(b >> 4) as usize] as char);
@@ -298,25 +327,35 @@ mod tests {
         let svc = Service::new(full_cfg());
         let req = svc
             .build_request(
-                &Message::new("alice@example.com", "重置验证码").with_content("您的验证码是 123456"),
+                &Message::new("alice@example.com", "重置验证码")
+                    .with_content("您的验证码是 123456"),
             )
             .unwrap();
-        assert_eq!(req.url, "https://api.mailgun.net/v3/mg.example.com/messages", "域名进路径");
+        assert_eq!(
+            req.url, "https://api.mailgun.net/v3/mg.example.com/messages",
+            "域名进路径"
+        );
         assert_eq!(
             req.headers[0],
             ("Authorization", "Basic YXBpOmtleS0x".to_string()),
             "Basic auth(api:key),用户名固定 api"
         );
         assert_eq!(req.content_type, "application/x-www-form-urlencoded");
-        assert!(req.body.contains("from=noreply%40mg.example.com"), "{}", req.body);
+        assert!(
+            req.body.contains("from=noreply%40mg.example.com"),
+            "{}",
+            req.body
+        );
         assert!(req.body.contains("to=alice%40example.com"), "{}", req.body);
         assert!(
-            req.body.contains("subject=%E9%87%8D%E7%BD%AE%E9%AA%8C%E8%AF%81%E7%A0%81"),
+            req.body
+                .contains("subject=%E9%87%8D%E7%BD%AE%E9%AA%8C%E8%AF%81%E7%A0%81"),
             "{}",
             req.body
         );
         assert!(
-            req.body.contains("text=%E6%82%A8%E7%9A%84%E9%AA%8C%E8%AF%81%E7%A0%81%E6%98%AF+123456"),
+            req.body
+                .contains("text=%E6%82%A8%E7%9A%84%E9%AA%8C%E8%AF%81%E7%A0%81%E6%98%AF+123456"),
             "空格转 +: {}",
             req.body
         );
@@ -332,7 +371,9 @@ mod tests {
         assert!(err.to_string().contains("domain/api_key required"), "{err}");
 
         let svc = Service::new(full_cfg());
-        let err = svc.send(&Message::new("", "t").with_content("c")).unwrap_err();
+        let err = svc
+            .send(&Message::new("", "t").with_content("c"))
+            .unwrap_err();
         assert!(err.is_not_configured(), "{err}");
         assert!(err.to_string().contains("recipient is empty"), "{err}");
 
@@ -360,8 +401,15 @@ mod tests {
     #[test]
     fn test_basic_auth_and_endpoint() {
         assert_eq!(basic_auth("api", "key-1"), "Basic YXBpOmtleS0x");
-        assert_eq!(endpoint("https://api.mailgun.net", "mg.example.com"), "https://api.mailgun.net/v3/mg.example.com/messages");
-        assert_eq!(endpoint("https://api.eu.mailgun.net/", "mg.example.com"), "https://api.eu.mailgun.net/v3/mg.example.com/messages", "尾部斜杠剥掉");
+        assert_eq!(
+            endpoint("https://api.mailgun.net", "mg.example.com"),
+            "https://api.mailgun.net/v3/mg.example.com/messages"
+        );
+        assert_eq!(
+            endpoint("https://api.eu.mailgun.net/", "mg.example.com"),
+            "https://api.eu.mailgun.net/v3/mg.example.com/messages",
+            "尾部斜杠剥掉"
+        );
     }
 
     // 路径段转义(Go url.PathEscape 语义):子分隔符直通,斜杠与空格转义。
@@ -370,16 +418,32 @@ mod tests {
         assert_eq!(path_escape("mg.example.com"), "mg.example.com");
         assert_eq!(path_escape("a/b"), "a%2Fb", "路径段里的斜杠要转义");
         assert_eq!(path_escape("a b"), "a%20b", "路径里的空格是 %20 不是 +");
-        assert_eq!(path_escape("a$b&c+d,e;f=g:h@i~j_k-l.m"), "a$b&c+d,e;f=g:h@i~j_k-l.m", "子分隔符直通");
+        assert_eq!(
+            path_escape("a$b&c+d,e;f=g:h@i~j_k-l.m"),
+            "a$b&c+d,e;f=g:h@i~j_k-l.m",
+            "子分隔符直通"
+        );
         assert_eq!(path_escape("100%"), "100%25");
     }
 
     // build_form 纯函数:表单键有序、值经 QueryEscape。
     #[test]
     fn test_build_form() {
-        let body = build_form("noreply@mg.example.com", "alice@example.com", "标题", "正文 123");
-        let keys: Vec<&str> = body.split('&').map(|kv| kv.split('=').next().unwrap()).collect();
-        assert_eq!(keys, ["from", "subject", "text", "to"], "表单键按字母序出站");
+        let body = build_form(
+            "noreply@mg.example.com",
+            "alice@example.com",
+            "标题",
+            "正文 123",
+        );
+        let keys: Vec<&str> = body
+            .split('&')
+            .map(|kv| kv.split('=').next().unwrap())
+            .collect();
+        assert_eq!(
+            keys,
+            ["from", "subject", "text", "to"],
+            "表单键按字母序出站"
+        );
     }
 
     // 回执解析:消息 id 进回执;应答不是 JSON 不判失败(id 留空);非 2xx 归投递失败。
