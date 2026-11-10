@@ -1069,4 +1069,13 @@ mod envelope_tests {
             assert!(PasswordEnvelope::decrypt(&key, bad).is_err(), "{bad:?}");
         }
     }
+
+    #[test]
+    fn must_decrypt_round_trip() {
+        let enc = Encryptor::new("my-secret-key").unwrap();
+        let ciphertext = enc.encrypt("must-decrypt-me").unwrap();
+        assert_eq!(enc.must_decrypt(&ciphertext), "must-decrypt-me");
+        // 未加前缀的明文原样返回
+        assert_eq!(enc.must_decrypt("plain"), "plain");
+    }
 }

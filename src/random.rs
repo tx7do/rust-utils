@@ -610,4 +610,24 @@ mod tests {
         assert_eq!(string_with_charset(5, b"Q"), "QQQQQ");
         assert_eq!(string_with_charset(0, charset), "");
     }
+
+    #[test]
+    fn test_dice_bounds() {
+        let mut r = Randomizer::with_seed(42);
+        let (mut saw_min, mut saw_max) = (false, false);
+        for _ in 0..1000 {
+            let (a, b, c, d) = (r.d6(), r.d10(), r.d20(), r.d100());
+            assert!((1..=6).contains(&a));
+            assert!((1..=10).contains(&b));
+            assert!((1..=20).contains(&c));
+            assert!((1..=100).contains(&d));
+            saw_min |= a == 1;
+            saw_max |= a == 6;
+        }
+        // 1000 掷下 d6 两端都该出现(漏一端概率约 (5/6)^1000)
+        assert!(saw_min && saw_max);
+        // 单面骰恒为 1
+        assert_eq!(r.dice(1), 1);
+        assert_eq!(r.dice(1), 1);
+    }
 }

@@ -194,3 +194,35 @@ impl Renderer for ChromeRenderer {
 pub async fn render_pdf(opts: PrintOptions) -> Result<Vec<u8>, String> {
     ChromeRenderer.render_pdf(opts).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opts(html: &str, w: f64, h: f64) -> PrintOptions {
+        PrintOptions {
+            html: html.to_string(),
+            paper_width_mm: w,
+            paper_height_mm: h,
+            landscape: false,
+            background: false,
+        }
+    }
+
+    // 参数校验在触碰浏览器之前执行,无 Chrome 的环境也能跑。
+    #[tokio::test]
+    async fn render_pdf_rejects_empty_html() {
+        let err = render_pdf(opts("", 210.0, 297.0)).await.unwrap_err();
+        assert_eq!(err, "printrender: empty html");
+    }
+
+    #[tokio::test]
+    async fn render_pdf_rejects_non_positive_paper_size() {
+        for (w, h) in [(0.0, 297.0), (210.0, 0.0), (-1.0, 297.0), (210.0, -1.0)] {
+            let err = render_pdf(opts("<html><body>x</body></html>", w, h))
+                .await
+                .unwrap_err();
+            assert_eq!(err, "printrender: paper size required (mm)", "w={w} h={h}");
+        }
+    }
+}

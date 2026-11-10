@@ -948,4 +948,16 @@ mod tests {
         assert!(b > 0);
         assert_ne!(a, b);
     }
+
+    #[test]
+    fn test_unify_machine_id_real() {
+        // 与 format_machine_id 同源:平台机器码读不到时内部降级 SHA-256,
+        // 任何成功结果都应是 32 位小写十六进制。
+        if let Ok(id) = unify_machine_id() {
+            assert_eq!(id.len(), 32);
+            assert!(id
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        }
+    }
 }

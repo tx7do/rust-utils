@@ -747,4 +747,19 @@ mod tests {
         // 空串
         assert_eq!(replace_non_alphanumeric("", "-"), "");
     }
+
+    #[test]
+    fn test_to_snake_case_alias() {
+        // [`to_snake_case`] 是 [`snake_case`] 的别名,行为必须一致
+        for s in [
+            "HTTPStatusCode",
+            "xmlHttpRequest",
+            "already_snake",
+            "PascalCase",
+            "",
+        ] {
+            assert_eq!(to_snake_case(s), snake_case(s), "{s}");
+        }
+        assert_eq!(to_snake_case("HTTPStatusCode"), "http_status_code");
+    }
 }

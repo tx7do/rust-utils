@@ -1272,4 +1272,19 @@ mod tests {
         let sig: Signature = sk.sign_prehash(&digest).unwrap();
         assert!(vk.verify_prehash(&digest, &sig).is_ok());
     }
+
+    #[test]
+    fn test_http_request_header_lookup() {
+        let req = build("", &[("content-type", "text/html")]);
+        // 查找名按小写归一化,任意大小写命中同一键
+        assert_eq!(req.header("content-type"), Some("text/html"));
+        assert_eq!(req.header("Content-Type"), Some("text/html"));
+        assert_eq!(req.header("CONTENT-TYPE"), Some("text/html"));
+        // 未命中与空头名
+        assert_eq!(req.header("x-missing"), None);
+        assert_eq!(req.header(""), None);
+        // 存储键约定为小写:归一化只作用于查找名,大写存储键不可达
+        let raw = build("", &[("Content-Type", "text/html")]);
+        assert_eq!(raw.header("Content-Type"), None);
+    }
 }
