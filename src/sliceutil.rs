@@ -310,9 +310,11 @@ mod tests {
 /// assert_eq!(got.len(), 4);
 /// assert!(got.contains(&1) && got.contains(&2) && got.contains(&3) && got.contains(&4));
 /// ```
-pub fn collect_subtree_ids(rows: &[(u32, Option<u32>)], root: u32) -> Vec<u32> {
-    let mut children_of: std::collections::HashMap<u32, Vec<u32>> =
-        std::collections::HashMap::new();
+pub fn collect_subtree_ids<T: Copy + Eq + std::hash::Hash>(
+    rows: &[(T, Option<T>)],
+    root: T,
+) -> Vec<T> {
+    let mut children_of: std::collections::HashMap<T, Vec<T>> = std::collections::HashMap::new();
     for &(id, parent) in rows {
         if let Some(p) = parent {
             children_of.entry(p).or_default().push(id);
