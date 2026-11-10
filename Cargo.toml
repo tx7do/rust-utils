@@ -9,6 +9,9 @@ repository = "https://github.com/tx7do/rust-utils"
 readme = "README.md"
 keywords = ["utils", "toolbox", "stringcase", "snowflake", "pagination"]
 categories = ["development-tools", "utilities"]
+# 62MB 的 GeoLite2 测试库只服务单测(assets/geoip/README.md),不进发布包;
+# 测试从 CARGO_MANIFEST_DIR 运行时读取,包内缺失时用例自行跳过。
+exclude = ["assets/geoip"]
 
 [features]
 default = []
