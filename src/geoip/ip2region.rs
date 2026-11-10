@@ -1049,4 +1049,71 @@ mod tests {
         let empty = Searcher::new_with_buffer(IpVersion::IPv4, Vec::new()).unwrap();
         assert!(empty.search_by_str("1.2.0.5").is_err());
     }
+
+    /// 读取 assets/geoip 下的真实 xdb(与上游 go-utils 内嵌同源)。
+    /// 数据不随 crates.io 包分发,缺失时跳过。
+    fn real_xdb(name: &str) -> Option<Vec<u8>> {
+        let path = format!("{}/assets/geoip/{}", env!("CARGO_MANIFEST_DIR"), name);
+        match std::fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(_) => {
+                eprintln!("跳过:未找到测试数据 {path}");
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn ip2region_real_db_v4_query() {
+        let Some(db) = real_xdb("ip2region_v4.xdb") else { return };
+        // 上游 client_test.go 的同一 IPv4;BufferCache 走免池查询器,
+        // 避免默认 20 池成员各克隆一份整文件
+        let cfg = Config::new_v4(CachePolicy::BufferCache, db, 1).unwrap();
+        let client = Client::with_configs(Some(cfg), None).unwrap();
+        let r = client.query("113.92.157.29").unwrap();
+        assert_eq!(r.country, "中国");
+        assert_eq!(r.province, "广东省");
+        assert_eq!(r.city, "深圳市");
+        assert_eq!(r.isp, "电信");
+    }
+
+    #[test]
+    fn ip2region_real_db_v6_query() {
+        let Some(db) = real_xdb("ip2region_v6.xdb") else { return };
+        // 上游 client_test.go 的同一 IPv6
+        let cfg = Config::new_v6(CachePolicy::BufferCache, db, 1).unwrap();
+        let client = Client::with_configs(None, Some(cfg)).unwrap();
+        let r = client
+            .query("240e:3b7:3272:d8d0:db09:c067:8d59:539e")
+            .unwrap();
+        assert_eq!(r.country, "中国");
+        assert_eq!(r.province, "广东省");
+        assert_eq!(r.city, "深圳市");
+        assert_eq!(r.isp, "电信");
+    }
+
+    #[test]
+    fn ip2region_real_db_dual_stack() {
+        // 双库同载(v4 走 v4 库,v6 走 v6 库),并核验 Searcher 直查
+        let (Some(v4), Some(v6)) = (real_xdb("ip2region_v4.xdb"), real_xdb("ip2region_v6.xdb"))
+        else {
+            return;
+        };
+        let v4_cfg = Config::new_v4(CachePolicy::BufferCache, v4, 1).unwrap();
+        let v6_cfg = Config::new_v6(CachePolicy::BufferCache, v6, 1).unwrap();
+        let client = Client::with_configs(Some(v4_cfg), Some(v6_cfg)).unwrap();
+        assert_eq!(
+            client.query("113.92.157.29").unwrap().city,
+            "深圳市"
+        );
+        assert_eq!(
+            client
+                .query("240e:3b7:3272:d8d0:db09:c067:8d59:539e")
+                .unwrap()
+                .city,
+            "深圳市"
+        );
+        // v4 库查 IPv6:版本不符返回错误
+        assert!(client.query("::1").is_err());
+    }
 }

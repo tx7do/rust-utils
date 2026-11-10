@@ -629,4 +629,52 @@ mod tests {
         assert_eq!(spilt_address("\n浙江省"), vec!["浙江省"]);
         assert_eq!(spilt_address("某\n某市"), vec!["某市"]);
     }
+
+    /// 读取真实 qqwry.dat(与上游 go-utils 内嵌同源)。
+    /// 数据不随 crates.io 包分发,缺失时跳过。
+    fn real_dat() -> Option<Client> {
+        let path = format!("{}/assets/geoip/qqwry.dat", env!("CARGO_MANIFEST_DIR"));
+        match std::fs::read(&path) {
+            Ok(bytes) => Some(
+                Client::from_bytes(bytes)
+                    .map_err(|e| panic!("内置测试库加载失败({path}): {e}"))
+                    .unwrap(),
+            ),
+            Err(_) => {
+                eprintln!("跳过:未找到测试数据 {path}");
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn qqwry_real_dat_query() {
+        let Some(client) = real_dat() else { return };
+        // 索引条目数应达到真实库的量级(十万余条)
+        assert!(client.ip_num > 100_000, "ip_num={}", client.ip_num);
+
+        // 与上游 go-utils qqwry_test.go 同一断言;qqwry 的结果 ip 字段
+        // 填查询串(与 geolite/ip2region 留空的分工不同)
+        let r = client.query("47.108.149.89").unwrap();
+        assert_eq!(r.ip, "47.108.149.89");
+        assert_eq!(r.country, "中国");
+        assert_eq!(r.province, "四川省");
+        assert_eq!(r.city, "成都市");
+        assert_eq!(r.isp, "阿里云");
+
+        // 海外记录的怪癖:country 恒为"中国",实际地名在 city/isp
+        let r = client.query("8.8.8.8").unwrap();
+        assert_eq!(r.country, "中国");
+        assert_eq!(r.province, "");
+        assert_eq!(r.city, "美国");
+
+        // 内网:省/市置"局域网"(上游 Go 断言"本机地址",Rust 版改为局域网)
+        let r = client.query("127.0.0.1").unwrap();
+        assert_eq!(r.country, "中国");
+        assert_eq!(r.province, "局域网");
+        assert_eq!(r.city, "局域网");
+
+        // IPv6 不是 qqwry 的射程:解析错误
+        assert_eq!(client.query("::1").unwrap_err(), "ip is not ipv4");
+    }
 }
