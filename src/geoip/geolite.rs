@@ -156,7 +156,13 @@ mod tests {
     #[test]
     fn geolite_private_ip_short_circuits() {
         let Some(g) = test_client() else { return };
-        for ip in ["127.0.0.1", "::1", "192.168.1.1", "10.0.0.7", "::ffff:172.16.3.4"] {
+        for ip in [
+            "127.0.0.1",
+            "::1",
+            "192.168.1.1",
+            "10.0.0.7",
+            "::ffff:172.16.3.4",
+        ] {
             let ret = g.query(ip).unwrap();
             assert_eq!(ret.country, "局域网", "{ip}");
             assert_eq!(ret.province, "局域网", "{ip}");

@@ -1065,7 +1065,9 @@ mod tests {
 
     #[test]
     fn ip2region_real_db_v4_query() {
-        let Some(db) = real_xdb("ip2region_v4.xdb") else { return };
+        let Some(db) = real_xdb("ip2region_v4.xdb") else {
+            return;
+        };
         // 上游 client_test.go 的同一 IPv4;BufferCache 走免池查询器,
         // 避免默认 20 池成员各克隆一份整文件
         let cfg = Config::new_v4(CachePolicy::BufferCache, db, 1).unwrap();
@@ -1079,7 +1081,9 @@ mod tests {
 
     #[test]
     fn ip2region_real_db_v6_query() {
-        let Some(db) = real_xdb("ip2region_v6.xdb") else { return };
+        let Some(db) = real_xdb("ip2region_v6.xdb") else {
+            return;
+        };
         // 上游 client_test.go 的同一 IPv6
         let cfg = Config::new_v6(CachePolicy::BufferCache, db, 1).unwrap();
         let client = Client::with_configs(None, Some(cfg)).unwrap();
@@ -1102,10 +1106,7 @@ mod tests {
         let v4_cfg = Config::new_v4(CachePolicy::BufferCache, v4, 1).unwrap();
         let v6_cfg = Config::new_v6(CachePolicy::BufferCache, v6, 1).unwrap();
         let client = Client::with_configs(Some(v4_cfg), Some(v6_cfg)).unwrap();
-        assert_eq!(
-            client.query("113.92.157.29").unwrap().city,
-            "深圳市"
-        );
+        assert_eq!(client.query("113.92.157.29").unwrap().city, "深圳市");
         assert_eq!(
             client
                 .query("240e:3b7:3272:d8d0:db09:c067:8d59:539e")
