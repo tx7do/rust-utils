@@ -16,6 +16,7 @@
 //! | [`sqlutil`] | 默认 | PostgreSQL 词法级 SQL 脱敏(MaskSQL)与表提取(ExtractTables) |
 //! | [`maputil`] | 默认 | keys/values/merge/drop/filter |
 //! | [`mathutil`] | 默认 | 统计量、手写正态分布(Gaussian)、Erfc/Ierfc |
+//! | [`sensitive`] | 默认 | 敏感词过滤:词典树最长匹配、穿插字符跳过、打码 |
 //! | [`netutil`] | 默认 | SSRF 防护(URL 校验 + 黑名单网段 + DNS 解析检查)、可信代理链客户端 IP |
 //! | [`pagination`] | 默认 | 分页偏移量 |
 //! | [`cryptocurrency`] | 默认 | 加密货币钱包地址格式校验 |
@@ -24,7 +25,7 @@
 //! | [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
 //! | [`eventbus`] | 默认 | 进程内事件总线:订阅/发布 + 中间件链 + 多总线管理器 |
 //! | [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
-//! | [`authorizer`] | 默认 | 授权管理器壳:Engine 抽象 + noop/deny-all(fail-closed) |
+//! | [`authorizer`] | 默认 | 授权管理器壳:Engine 抽象 + noop/deny-all + 内置 RBAC 引擎(fail-closed) |
 //! | [`converter`] | 默认 | REST 路径 / operationID → `resource:action` 权限码 |
 //! | [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
 //! | [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
@@ -35,13 +36,13 @@
 //! | [`slug`] | `slug` | URL slug(unicode 转写) |
 //! | [`ossutil`] | `ossutil` | 对象存储辅助:MIME/魔数→桶与扩展名、文件名策略、上传守卫 |
 //! | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 + 复杂度校验 |
-//! | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 填充、Encryptor/payload 信封 |
+//! | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、Encryptor 信封、统一 Cipher/Signer 签名面 |
 //! | [`auditutil`] | `auditutil` | 审计日志:客户端 IP + 篡改证据链(prost 哈希 + ECDSA 签名) |
 //! | [`doctext`] | `doctext`(PDF 用 `doctext-pdf`) | txt/md/csv/html/docx/pdf 纯文本提取 |
 //! | [`fieldperm`] | `fieldperm` | 字段级读写裁剪(路径语义对齐 protoreflect 行为) |
 //! | [`mailer`] | `mailer` | SMTP 邮件:STARTTLS / 隐式 SSL,发件人显示名 |
 //! | [`notify`] | `notify` | 多渠道通知:webhook/IM/SMS/vendor push,SSRF 防线出站 |
-//! | [`jwt`] | `jwt` | JWT 生成/解析/校验/刷新(HS256) |
+//! | [`jwt`] | `jwt` | JWT 生成/解析/校验/刷新:HS256 对称 + RS*/PS*/ES* PEM 非对称(alg 钉死防混淆) |
 //! | [`bank_card`] | `bank-card` | Luhn 校验 + BIN 查询(内嵌记录) |
 //! | [`captcha`] | `captcha`(Redis 落地用 `captcha-redis`) | 图形验证码:四类文本驱动 + 滑块/点选/旋转,自绘渲染 |
 //! | [`geoip`] | `geoip` | IP 归属地三后端:qqwry、ip2region xdb v2、MaxMind mmdb,数据由调用方加载 |
@@ -50,6 +51,12 @@
 //! | [`tls`] | `tls` | 从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
 //! | [`fieldmask`] | `fieldmask` | 字段掩码:嵌套掩码树 + filter/prune/overwrite/validate |
 //! | [`sm`] | `sm` | 国密 SM2(C1C3C2/ASN.1)/SM3/SM4-CBC |
+//! | [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP(SHA-1/256/512)、otpauth:// URI 构造解析 |
+//! | [`qrcode`] | `qrcode`(PNG 用 `qrcode-png`) | QR 码:模块矩阵 + SVG + 终端块字符,解码回环已测 |
+//! | [`xlsx`] | `xlsx` | Excel 读写:calamine 读 + rust_xlsxwriter 写,写出读回闭环 |
+//! | [`code_generator`] | `code-generator` | 模板驱动代码生成:mustache 子集渲染(缺字段即报错)+ 落盘守卫 |
+//! | [`mapper`] | `mapper` | entity↔DTO 字段映射:rename/嵌套搬移/枚举转换/缺省/白名单 |
+//! | [`printrender`] | `printrender` | HTML/URL → PDF(页边距/缩放/页眉脚/页码范围)与 PNG/JPEG 截图 |
 
 #![allow(clippy::module_inception)]
 
@@ -68,6 +75,7 @@ pub mod mathutil;
 pub mod netutil;
 pub mod pagination;
 pub mod query_parser;
+pub mod sensitive;
 pub mod sliceutil;
 pub mod sqlutil;
 pub mod stringcase;
@@ -146,6 +154,8 @@ pub(crate) mod base64util {
 pub mod auditutil;
 #[cfg(feature = "captcha")]
 pub mod captcha;
+#[cfg(feature = "code-generator")]
+pub mod code_generator;
 #[cfg(feature = "crypto")]
 pub mod crypto;
 #[cfg(feature = "chrono")]
@@ -164,6 +174,8 @@ pub mod geoip;
 pub mod jwt;
 #[cfg(feature = "mailer")]
 pub mod mailer;
+#[cfg(feature = "mapper")]
+pub mod mapper;
 #[cfg(feature = "name-generator")]
 pub mod name_generator;
 #[cfg(feature = "notify")]
@@ -176,6 +188,8 @@ pub mod otp;
 pub mod password;
 #[cfg(feature = "printrender")]
 pub mod printrender;
+#[cfg(feature = "qrcode")]
+pub mod qrcode;
 #[cfg(feature = "rand")]
 pub mod random;
 #[cfg(feature = "slug")]
@@ -188,6 +202,8 @@ pub mod timeutil;
 pub mod tls;
 #[cfg(feature = "translator")]
 pub mod translator;
+#[cfg(feature = "xlsx")]
+pub mod xlsx;
 
 #[cfg(all(
     test,
