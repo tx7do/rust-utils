@@ -38,6 +38,7 @@ rust-utils = "0.1"
 | [`sqlutil`] | 默认 | PostgreSQL 方言の字句レベル SQL マスキング(MaskSQL)とテーブル抽出(ExtractTables) |
 | [`maputil`] | デフォルト | keys/values/merge/drop/filter |
 | [`mathutil`] | デフォルト | 統計量、手書き正規分布(Gaussian)、Erfc/Ierfc |
+| [`sensitive`] | デフォルト | センシティブワードフィルタ:トライ木の最長一致、介在文字スキップ、マスキング |
 | [`netutil`] | 默认 | SSRF 防護(URL 検証 + 拒否 CIDR + DNS 解決チェック)、信頼プロキシチェーンによるクライアント IP |
 | [`pagination`] | デフォルト | ページング オフセット |
 | [`cryptocurrency`] | デフォルト | 暗号資産ウォレットアドレスの形式検証 |
@@ -47,7 +48,7 @@ rust-utils = "0.1"
 | [`eventbus`] | 默认 | プロセス内イベントバス:購読/発行 + ミドルウェアチェーン + マルチバスマネージャー |
 | [`aggregator`] | デフォルト | 関連データ紐付け(リスト/ツリー)+ 並列エグゼキュータ + キャッシュ式バッチローダ |
 | [`converter`] | 默认 | REST パス / operationID → `resource:action` 権限コード |
-| [`authorizer`] | 默认 | 認可マネージャー骨格:Engine 抽象 + noop/deny-all(fail-closed) |
+| [`authorizer`] | 默认 | 認可マネージャー骨格:Engine 抽象 + noop/deny-all + 内蔵 RBAC エンジン(fail-closed) |
 | [`id`] | デフォルト(`uuid` 任意) | Snowflake ID、注文番号、マシンコード(内蔵 SHA-256)、UUID v4/v7 |
 | [`fsutil`] | デフォルト(`glob` 任意) | ファイル/パス補助 |
 | [`dateutil`] | `chrono` | 日粒度の丸め、期間判定 |
@@ -57,13 +58,13 @@ rust-utils = "0.1"
 | [`slug`] | `slug` | URL slug(Unicode 音訳) |
 | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA ハッシュ戦略 + 複雑度検証 |
 | [`ossutil`] | `ossutil` | オブジェクトストレージ補助:MIME/マジックバイト→バケット・拡張子マッピング、ファイル名戦略、アップロードガード |
-| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、PKCS#7 パディング、Encryptor(`enc:` プレフィックス)/payload エンベロープ/データ署名 |
+| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、Encryptor(`enc:` プレフィックス)エンベロープ、統一 Cipher/Signer 署名面 |
 | [`auditutil`] | `auditutil` | 監査ログ:クライアント IP + 改ざん検知チェーン(決定論的ハッシュ + ECDSA-P256 署名) |
 | [`doctext`] | `doctext`(PDF は `doctext-pdf`) | txt/md/csv/html/docx/pdf からのプレーンテキスト抽出 |
 | [`fieldperm`] | `fieldperm` | フィールド単位の読み書きトリミング(protoreflect の挙動に沿ったパス意味論) |
 | [`mailer`] | `mailer` | SMTP メール:STARTTLS / 暗黙 SSL、送信者表示名 |
 | [`notify`] | `notify` | マルチチャネル通知:webhook/IM/メール/SMS/ベンダープッシュ、SSRF 防護付き送信 |
-| [`jwt`] | `jwt` | JWT 生成/パース/検証/リフレッシュ(HS256) |
+| [`jwt`] | `jwt` | JWT 生成/パース/検証/リフレッシュ:HS256 共有鍵 + RS*/PS*/ES* PEM 非対称(検証側でアルゴリズム固定、混入攻撃防止) |
 | [`bank_card`] | `bank-card` | Luhn 検証 + BIN 検索(内蔵 2,013 件) |
 | [`captcha`] | `captcha` | 画像 CAPTCHA:数字/英数字/算術/中国語の 4 テキストドライバ + スライド/クリック/回転、自前描画、base64Captcha フロントエンド コンポーネント互換の JSON 出力、ストレージ差し替え可(Redis は `captcha-redis`) |
 | [`fieldmask`] | `fieldmask` | フィールドマスク:ネストしたマスクツリー構築 + filter/prune/overwrite/validate/パス正規化、`serde_json::Value` 上で動作 |
@@ -72,6 +73,12 @@ rust-utils = "0.1"
 | [`translator`] | `translator` | 翻訳 4 バックエンド:百度(MD5 署名)/阿里(RPC 署名)/Google(v1 素のエンドポイント、v2/v3 REST)/火山(HMAC-SHA256 派生チェーン)。1 回のリクエストで自動リトライなし、リクエスト構築と署名はオフライン検証可能 |
 | [`distlock`] | `distlock` | 分散ロック:Locker/Lock 抽象と取得オプション(Redis 実装は `distlock-redis`、bsm/redislock プロトコルとワイヤ互換。etcd バックエンドは未提供) |
 | [`sm`] | `sm` | 中国国家暗号 SM2(C1C3C2/ASN.1 の暗号化・署名検証)/SM3/SM4-CBC |
+| [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP(SHA-1/256/512、6〜8 桁、設定可能なウィンドウ)、`otpauth://` URI の構築と解析 |
+| [`qrcode`] | `qrcode`(PNG は `qrcode-png`) | QR コード:モジュール行列 + SVG + 端末ブロック文字、デコード往復をテスト済み |
+| [`xlsx`] | `xlsx` | Excel 読み書き:calamine リーダ + rust_xlsxwriter ライタ、書き出し→読み戻しをクレート内で閉ループテスト |
+| [`code_generator`] | `code-generator` | テンプレート駆動コード生成:mustache サブセット描画(未定義フィールドは即エラー)+ 出力ガード |
+| [`mapper`] | `mapper` | entity↔DTO フィールドマッピング(serde_json ブリッジ):rename/ネスト移動/列挙変換/デフォルト/ホワイトリスト |
+| [`printrender`] | `printrender` | HTML/URL → PDF(余白/スケール/ヘッダーフッター/ページ範囲)と PNG/JPEG スクリーンショット、ローカル Chrome/Edge CDP 駆動 |
 
 [`byteutil`]: src/byteutil.rs
 [`stringcase`]: src/stringcase.rs
@@ -114,6 +121,13 @@ rust-utils = "0.1"
 [`geoip`]: src/geoip.rs
 [`translator`]: src/translator.rs
 [`distlock`]: src/distlock.rs
+[`otp`]: src/otp.rs
+[`qrcode`]: src/qrcode.rs
+[`xlsx`]: src/xlsx.rs
+[`code_generator`]: src/code_generator.rs
+[`mapper`]: src/mapper.rs
+[`printrender`]: src/printrender.rs
+[`sensitive`]: src/sensitive.rs
 
 ## 例
 

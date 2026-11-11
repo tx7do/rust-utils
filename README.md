@@ -38,6 +38,7 @@ rust-utils = "0.1"
 | [`sqlutil`] | 默认 | Lexical SQL masking (MaskSQL) and table extraction (ExtractTables) for PostgreSQL-flavored SQL |
 | [`maputil`] | default | keys/values/merge/drop/filter |
 | [`mathutil`] | default | Statistics, hand-written Gaussian, Erfc/Ierfc |
+| [`sensitive`] | default | Sensitive-word filtering: trie longest-match, interspersed-char skipping, masking |
 | [`netutil`] | 默认 | SSRF protection (URL validation + blocked CIDRs + DNS resolve check), spoof-proof client IP via trusted proxy chain |
 | [`pagination`] | default | Pagination offsets |
 | [`cryptocurrency`] | default | Crypto wallet address format validation |
@@ -47,7 +48,7 @@ rust-utils = "0.1"
 | [`eventbus`] | 默认 | In-process event bus: subscribe/publish + middleware chain + multi-bus manager |
 | [`aggregator`] | default | Relation backfill (lists/trees) + parallel executor + cached batch loader |
 | [`converter`] | 默认 | REST path / operationID → `resource:action` permission code |
-| [`authorizer`] | 默认 | Authorization manager shell: Engine abstraction + noop/deny-all (fail-closed) |
+| [`authorizer`] | 默认 | Authorization manager shell: Engine abstraction + noop/deny-all + built-in RBAC engine (fail-closed) |
 | [`id`] | default (`uuid` optional) | Snowflake IDs, order IDs, machine codes (built-in SHA-256), UUID v4/v7 |
 | [`fsutil`] | default (`glob` optional) | File/path helpers |
 | [`dateutil`] | `chrono` | Day-granularity truncation, range checks |
@@ -57,13 +58,13 @@ rust-utils = "0.1"
 | [`slug`] | `slug` | URL slugs (unicode transliteration) |
 | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA hashing strategies + complexity validation |
 | [`ossutil`] | `ossutil` | Object-storage helpers: MIME/magic-byte → bucket & extension mapping, filename strategies, upload guards |
-| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2, PKCS#7 padding, Encryptor (`enc:` prefix) / payload envelope / data signing |
+| [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2, Encryptor (`enc:` prefix) envelope, unified Cipher/Signer faces |
 | [`auditutil`] | `auditutil` | Audit log: client IP + tamper-evidence chain (deterministic hashing + ECDSA-P256 signing) |
 | [`doctext`] | `doctext` (PDF via `doctext-pdf`) | Plain-text extraction from txt/md/csv/html/docx/pdf |
 | [`fieldperm`] | `fieldperm` | Field-level read/write trimming (path semantics aligned with the protoreflect behavior) |
 | [`mailer`] | `mailer` | SMTP mail: STARTTLS / implicit SSL, sender display name |
 | [`notify`] | `notify` | Multi-channel notification: webhook/IM/email/SMS/vendor push, SSRF-guarded outbound |
-| [`jwt`] | `jwt` | JWT generate/parse/verify/refresh (HS256) |
+| [`jwt`] | `jwt` | JWT generate/parse/verify/refresh: HS256 shared-secret + RS*/PS*/ES* PEM asymmetric (alg pinned against confusion) |
 | [`bank_card`] | `bank-card` | Luhn validation + BIN lookup (2,013 embedded records) |
 | [`captcha`] | `captcha` | Image CAPTCHA: digit/alphanumeric/arithmetic/Chinese text drivers + slide/click/rotate, self-drawn rendering, JSON output compatible with the base64Captcha front-end component, pluggable storage (`captcha-redis` adds a Redis store) |
 | [`fieldmask`] | `fieldmask` | Field masks: nested mask-tree building + filter/prune/overwrite/validate/path normalization, over `serde_json::Value` |
@@ -72,6 +73,12 @@ rust-utils = "0.1"
 | [`translator`] | `translator` | Translators for four backends: Baidu (MD5 signature) / Alibaba (RPC signature) / Google (bare v1 endpoint, v2/v3 REST) / Volc (HMAC-SHA256 derivation chain); one request per call, no automatic retry; request construction and signatures are offline-verifiable |
 | [`distlock`] | `distlock` | Distributed locks: Locker/Lock abstractions with acquire options (Redis store via `distlock-redis`, wire-compatible with the bsm/redislock protocol; no etcd backend yet) |
 | [`sm`] | `sm` | Chinese national crypto SM2 (C1C3C2/ASN.1 encryption & signatures) / SM3 / SM4-CBC |
+| [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP (SHA-1/256/512, 6–8 digits, configurable window), `otpauth://` URI building & parsing |
+| [`qrcode`] | `qrcode` (PNG via `qrcode-png`) | QR codes: module matrix + SVG + terminal block chars; decode roundtrip covered in tests |
+| [`xlsx`] | `xlsx` | Excel read/write: calamine reader + rust_xlsxwriter writer, write→read roundtrip tested in-crate |
+| [`code_generator`] | `code-generator` | Template-driven codegen: mustache-subset renderer (missing fields fail fast) + guarded file output |
+| [`mapper`] | `mapper` | entity↔DTO field mapping over serde_json: rename/nested move/enum conversion/defaults/whitelist |
+| [`printrender`] | `printrender` | HTML/URL → PDF (margins/scale/header-footer/page ranges) and PNG/JPEG screenshots via local Chrome/Edge CDP |
 
 [`byteutil`]: src/byteutil.rs
 [`stringcase`]: src/stringcase.rs
@@ -114,6 +121,13 @@ rust-utils = "0.1"
 [`geoip`]: src/geoip.rs
 [`translator`]: src/translator.rs
 [`distlock`]: src/distlock.rs
+[`otp`]: src/otp.rs
+[`qrcode`]: src/qrcode.rs
+[`xlsx`]: src/xlsx.rs
+[`code_generator`]: src/code_generator.rs
+[`mapper`]: src/mapper.rs
+[`printrender`]: src/printrender.rs
+[`sensitive`]: src/sensitive.rs
 
 ## Examples
 
