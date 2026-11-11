@@ -192,6 +192,19 @@ impl Sm2Cipher {
     }
 }
 
+/// 对齐 crypto 模块的统一签名面(与 ECDSA/RSA 可互换)。
+impl crate::crypto::Signer for Sm2Cipher {
+    fn sign(&self, data: &[u8]) -> Result<String, String> {
+        Sm2Cipher::sign(self, data)
+    }
+    fn verify(&self, data: &[u8], signature: &str) -> Result<bool, String> {
+        Sm2Cipher::verify(self, data, signature)
+    }
+    fn algorithm(&self) -> &'static str {
+        "SM2"
+    }
+}
+
 impl Cipher for Sm2Cipher {
     fn encrypt(&self, plain: &[u8]) -> Result<Vec<u8>, String> {
         let klen = plain.len();
@@ -403,6 +416,30 @@ mod tests {
     }
 
     // ---------- SM2 ----------
+
+    #[test]
+    fn test_sm2_signer_trait_dispatch() {
+        use crate::crypto::Signer;
+
+        let signer = super::Sm2Cipher::new().unwrap();
+        // 穿过统一签名面:签名/验签/算法名
+        let sig = signer.sign(b"sm2 trait payload").unwrap();
+        assert!(signer.verify(b"sm2 trait payload", &sig).unwrap());
+        assert!(!signer.verify(b"tampered payload", &sig).unwrap());
+        assert_eq!(Signer::algorithm(&signer), "SM2");
+
+        // 密钥恢复后的实例同样可验签(trait object 形态)
+        let restored = super::Sm2Cipher::from_keys(
+            &signer.private_key_bytes().unwrap(),
+            &signer.public_key_bytes().unwrap(),
+        )
+        .unwrap();
+        let boxed: Box<dyn Signer> = Box::new(restored);
+        assert!(boxed.verify(b"sm2 trait payload", &sig).unwrap());
+
+        // 坏签名格式报 Err
+        assert!(boxed.verify(b"sm2 trait payload", "!!!").is_err());
+    }
 
     #[test]
     fn test_sm2_encrypt_decrypt_roundtrip() {

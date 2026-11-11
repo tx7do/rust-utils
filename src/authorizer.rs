@@ -8,9 +8,9 @@
 //!
 //! # 与上游的差异(重要取舍)
 //!
-//! 1. **引擎实现只有两个**:上游壳依赖 `kratos-authz` 的四类引擎,本 crate
+//! 1. **引擎实现**:上游壳依赖 `kratos-authz` 的四类引擎,本 crate
 //!    改为 [`Engine`] trait(能力面逐一对齐上游 `engine.Engine` 接口,方法名
-//!    snake_case)+ 两个内置实现:
+//!    snake_case)+ 三个内置实现:
 //!    - [`NoopEngine`]:语义判断依据来自上游 `kratos-authz/engine/noop` 源码
 //!      (`State.IsAuthorized` 恒返回 `true, nil`;`ProjectsAuthorized` /
 //!      `FilterAuthorizedPairs` / `FilterAuthorizedProjects` 恒返回空集;
@@ -360,6 +360,189 @@ impl Engine for DenyAllEngine {
     }
 }
 
+/// 内置 RBAC 策略引擎(纯 std,零依赖)——把"壳"从只有 noop/deny-all
+/// 变成开箱可用。
+///
+/// 策略形态:
+/// - **授权规则**:角色/主体 → (路径模式, HTTP 方法) 集合。装载入口
+///   [`Engine::set_policies`] 同时接受 OPA 形态(键即角色,
+///   [`PolicyValue::OpaPaths`])与 Casbin 形态(`"policies"` 键下的
+///   [`PolicyValue::CasbinRules`,`v0`=角色 `v1`=路径 `v2`=方法,
+///   非 `"p"` 类型跳过),二者可混装。
+/// - **角色绑定**:`set_policies` 的 `roles` 参数:主体 → 角色(可传递,
+///   环保护;主体 ID 本身永远参与匹配,即"用户直绑权限")。
+///
+/// 匹配语义(fail-closed:无命中一律 `Ok(false)`):
+/// - 方法:精确相等,或规则侧 `*` 通配全部方法;
+/// - 路径:精确相等;`/api/v1/*` 单段通配(不跨 `/`);
+///   `/api/v1/**` 后缀通配(跨段);模式中段的 `*` 不通配(按字面量)。
+/// - 项目维度:本壳不装载项目级策略,`filter_authorized_projects` 恒空
+///   (与 noop 的过滤族同语义);`projects_authorized` 在
+///   (方法, 路径) 已被授权时放行全部候选项目。
+///
+/// 策略读写走 `RwLock`,支持运行期热更;引擎跨线程共享。
+#[derive(Debug, Default)]
+pub struct PolicyEngine {
+    /// 角色/主体 → (路径模式, 方法) 授权规则。
+    rules: std::sync::RwLock<HashMap<String, Vec<OpaPolicyPath>>>,
+    /// 主体 → 角色(可传递)。
+    role_bindings: std::sync::RwLock<RoleMap>,
+}
+
+impl PolicyEngine {
+    /// 创建空策略引擎(等待 [`Engine::set_policies`] 装载)。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 解析主体可达的"角色/主体"节点集:自身 + 绑定角色的传递闭包(环保护)。
+    fn resolve_nodes(&self, subject: &str) -> Vec<String> {
+        let bindings = self.role_bindings.read().expect("PolicyEngine 角色绑定锁");
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut queue = vec![subject.to_string()];
+        let mut nodes = Vec::new();
+        while let Some(node) = queue.pop() {
+            if !seen.insert(node.clone()) {
+                continue;
+            }
+            if let Some(parents) = bindings.get(&node) {
+                for parent in parents {
+                    if !seen.contains(parent) {
+                        queue.push(parent.clone());
+                    }
+                }
+            }
+            nodes.push(node);
+        }
+        nodes
+    }
+
+    /// 主体(经角色闭包)是否有任一规则命中 (方法, 路径)。
+    fn matches_any(&self, subject: &str, action: &str, resource: &str) -> bool {
+        if subject.is_empty() {
+            return false;
+        }
+        let rules = self.rules.read().expect("PolicyEngine 规则锁");
+        for node in self.resolve_nodes(subject) {
+            if let Some(paths) = rules.get(&node) {
+                if paths.iter().any(|p| {
+                    method_matches(&p.method, action) && path_matches(&p.pattern, resource)
+                }) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+/// 方法匹配:精确相等,或规则侧 `*` 通配。
+fn method_matches(rule_method: &str, action: &str) -> bool {
+    rule_method == "*" || rule_method.eq_ignore_ascii_case(action)
+}
+
+/// 路径匹配:精确;`*` 全通配;`/*` 结尾单段通配;`/**` 结尾跨段通配。
+fn path_matches(pattern: &str, path: &str) -> bool {
+    if pattern == "*" || pattern == path {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix("**") {
+        return path.starts_with(prefix);
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return path.starts_with(prefix) && !path[prefix.len()..].contains('/');
+    }
+    false
+}
+
+impl Engine for PolicyEngine {
+    fn name(&self) -> &str {
+        "builtin"
+    }
+
+    fn is_authorized(
+        &self,
+        subject: &str,
+        action: &str,
+        resource: &str,
+        _project: &str,
+    ) -> Result<bool, String> {
+        Ok(self.matches_any(subject, action, resource))
+    }
+
+    fn projects_authorized(
+        &self,
+        subjects: &[Subject],
+        action: &str,
+        resource: &str,
+        projects: &[Project],
+    ) -> Result<Projects, String> {
+        // 项目维度无策略:(方法, 路径) 已授权 → 全部候选项目放行
+        if subjects
+            .iter()
+            .any(|s| self.matches_any(s, action, resource))
+        {
+            Ok(projects.to_vec())
+        } else {
+            Ok(Projects::new())
+        }
+    }
+
+    fn filter_authorized_pairs(
+        &self,
+        subjects: &[Subject],
+        pairs: &[Pair],
+    ) -> Result<Pairs, String> {
+        Ok(pairs
+            .iter()
+            .filter(|p| {
+                subjects
+                    .iter()
+                    .any(|s| self.matches_any(s, &p.action, &p.resource))
+            })
+            .cloned()
+            .collect())
+    }
+
+    fn filter_authorized_projects(&self, _subjects: &[Subject]) -> Result<Projects, String> {
+        // 项目维度无策略(见类型文档),恒空
+        Ok(Projects::new())
+    }
+
+    fn set_policies(&self, policies: &PolicyMap, roles: Option<&RoleMap>) -> Result<(), String> {
+        let mut rules: HashMap<String, Vec<OpaPolicyPath>> = HashMap::new();
+        for (key, value) in policies {
+            match value {
+                PolicyValue::OpaPaths(paths) => {
+                    rules
+                        .entry(key.clone())
+                        .or_default()
+                        .extend(paths.iter().cloned());
+                }
+                PolicyValue::CasbinRules(casbin_rules) => {
+                    for rule in casbin_rules {
+                        if rule.p_type != "p" {
+                            continue;
+                        }
+                        rules
+                            .entry(rule.v0.clone())
+                            .or_default()
+                            .push(OpaPolicyPath {
+                                pattern: rule.v1.clone(),
+                                method: rule.v2.clone(),
+                            });
+                    }
+                }
+                PolicyValue::Projects(_) => {}
+            }
+        }
+        *self.rules.write().expect("PolicyEngine 规则锁") = rules;
+        *self.role_bindings.write().expect("PolicyEngine 角色绑定锁") =
+            roles.cloned().unwrap_or_default();
+        Ok(())
+    }
+}
+
 /// 生成 Casbin 策略(上游 `generateCasbinPolicies` 的数据变换部分)。
 ///
 /// 角色 → 权限列表 展平为 `"p"` 规则(`v0=角色, v1=路径, v2=方法,
@@ -462,7 +645,7 @@ impl Authorizer {
 
         let policies = match engine.name() {
             "casbin" => generate_casbin_policies(&result),
-            "opa" => generate_opa_policies(&result),
+            "opa" | "builtin" => generate_opa_policies(&result),
             "noop" => return Ok(()),
             other => return Err(format!("unknown engine name: {other}")),
         };
@@ -475,12 +658,15 @@ impl Authorizer {
     /// 创建权限引擎(上游 `newEngine` 的分派)。
     ///
     /// - `""` / `"noop"` → [`NoopEngine`];
+    /// - `"builtin"` → [`PolicyEngine`](Rust 侧新增的内置 RBAC 引擎,
+    ///   上游无对应物——casbin/opa 生态不在时的零依赖替代);
     /// - `"casbin"` / `"opa"` / `"zanzibar"` → [`DenyAllEngine`]
     ///   (fail-closed,见模块文档差异 2/4);
     /// - 未知类型 → 按上游 default fallthrough 到 noop。
     fn new_engine(cfg: &EngineConfig) -> Arc<dyn Engine> {
         match cfg.engine_type.as_str() {
             "" | "noop" => Arc::new(NoopEngine),
+            "builtin" => Arc::new(PolicyEngine::new()),
             "casbin" | "opa" | "zanzibar" => Arc::new(DenyAllEngine),
             _ => Arc::new(NoopEngine),
         }
@@ -908,6 +1094,7 @@ mod tests {
         assert_send_sync::<Authorizer>();
         assert_send_sync::<NoopEngine>();
         assert_send_sync::<DenyAllEngine>();
+        assert_send_sync::<PolicyEngine>();
 
         // 跨线程实际使用引擎
         let a = Arc::new(Authorizer::new(
@@ -920,5 +1107,274 @@ mod tests {
             assert!(engine.is_authorized("u", "GET", "/x", "").unwrap());
         });
         handle.join().expect("子线程不应 panic");
+    }
+
+    // -------------------------------------------------------------------
+    // 内置 RBAC 引擎(PolicyEngine)
+    // -------------------------------------------------------------------
+
+    fn opa_policies(entries: &[(&str, &str, &str)]) -> PolicyMap {
+        let mut map: HashMap<String, Vec<OpaPolicyPath>> = HashMap::new();
+        for (role, pattern, method) in entries {
+            map.entry(role.to_string())
+                .or_default()
+                .push(OpaPolicyPath {
+                    pattern: pattern.to_string(),
+                    method: method.to_string(),
+                });
+        }
+        map.into_iter()
+            .map(|(k, v)| (k, PolicyValue::OpaPaths(v)))
+            .collect()
+    }
+
+    #[test]
+    fn policy_engine_direct_subject_binding() {
+        // 用户直绑权限:subject 即规则键
+        let e = PolicyEngine::new();
+        e.set_policies(&opa_policies(&[("user-1", "/api/v1/users", "GET")]), None)
+            .unwrap();
+        assert_eq!(e.name(), "builtin");
+        assert!(e
+            .is_authorized("user-1", "GET", "/api/v1/users", "")
+            .unwrap());
+        // 换方法/换路径/换主体/空主体全部拒绝(fail-closed,Ok(false))
+        assert!(!e
+            .is_authorized("user-1", "POST", "/api/v1/users", "")
+            .unwrap());
+        assert!(!e
+            .is_authorized("user-1", "GET", "/api/v1/orders", "")
+            .unwrap());
+        assert!(!e
+            .is_authorized("user-2", "GET", "/api/v1/users", "")
+            .unwrap());
+        assert!(!e.is_authorized("", "GET", "/api/v1/users", "").unwrap());
+        // 无策略时也拒绝
+        assert!(!PolicyEngine::new()
+            .is_authorized("u", "GET", "/x", "")
+            .unwrap());
+    }
+
+    #[test]
+    fn policy_engine_role_bindings_and_inheritance() {
+        // 角色绑定 + 传递闭包:alice→editor→viewer;环保护(a→b→a)
+        let e = PolicyEngine::new();
+        e.set_policies(
+            &opa_policies(&[
+                ("viewer", "/api/v1/reports", "GET"),
+                ("editor", "/api/v1/articles", "*"),
+            ]),
+            Some(&{
+                let mut m = RoleMap::new();
+                m.insert("alice".to_string(), vec!["editor".to_string()]);
+                m.insert("editor".to_string(), vec!["viewer".to_string()]);
+                // 环:carol→dave→carol,carol 自身仍需能解析
+                m.insert("carol".to_string(), vec!["dave".to_string()]);
+                m.insert("dave".to_string(), vec!["carol".to_string()]);
+                m
+            }),
+        )
+        .unwrap();
+        // 直绑角色 editor:* 通配全部方法
+        assert!(e
+            .is_authorized("alice", "POST", "/api/v1/articles", "")
+            .unwrap());
+        assert!(e
+            .is_authorized("alice", "DELETE", "/api/v1/articles", "")
+            .unwrap());
+        // 传递继承 viewer
+        assert!(e
+            .is_authorized("alice", "GET", "/api/v1/reports", "")
+            .unwrap());
+        // viewer 未授权 articles
+        assert!(!e
+            .is_authorized("alice", "GET", "/api/v1/reports/x", "")
+            .unwrap());
+        // 未绑定主体拒绝
+        assert!(!e
+            .is_authorized("mallory", "GET", "/api/v1/reports", "")
+            .unwrap());
+        // 环保护:carol 可解析(空集),不栈溢出
+        assert!(!e
+            .is_authorized("carol", "GET", "/api/v1/reports", "")
+            .unwrap());
+    }
+
+    #[test]
+    fn policy_engine_path_patterns() {
+        let e = PolicyEngine::new();
+        e.set_policies(
+            &opa_policies(&[
+                ("r-exact", "/api/v1/users", "GET"),
+                ("r-single", "/api/v1/orders/*", "GET"),
+                ("r-deep", "/files/**", "GET"),
+                ("r-method-star", "*", "POST"),
+            ]),
+            None,
+        )
+        .unwrap();
+        let t = |subject: &str, method: &str, path: &str| {
+            e.is_authorized(subject, method, path, "").unwrap()
+        };
+        // 精确
+        assert!(t("r-exact", "GET", "/api/v1/users"));
+        // 单段通配:匹配一段,不跨 /
+        assert!(t("r-single", "GET", "/api/v1/orders/123"));
+        assert!(!t("r-single", "GET", "/api/v1/orders/123/items"));
+        assert!(!t("r-single", "GET", "/api/v1/orders"));
+        // 后缀 ** 跨段
+        assert!(t("r-deep", "GET", "/files/a"));
+        assert!(t("r-deep", "GET", "/files/a/b/c.txt"));
+        assert!(!t("r-deep", "GET", "/files")); // 前缀本身不算
+                                                // 路径 * + 方法 * 的组合(资源级全放行只对 POST 方法)
+        assert!(t("r-method-star", "POST", "/anything/here"));
+        assert!(!t("r-method-star", "GET", "/anything/here"));
+    }
+
+    #[test]
+    fn policy_engine_accepts_casbin_rules_and_ignores_non_p() {
+        // Casbin 形态装载;g 规则跳过(角色绑定走 roles 参数)
+        let e = PolicyEngine::new();
+        let mut policies = PolicyMap::new();
+        policies.insert(
+            "policies".to_string(),
+            PolicyValue::CasbinRules(vec![
+                PolicyRule {
+                    p_type: "p".to_string(),
+                    v0: "admin".to_string(),
+                    v1: "/api/v1/**".to_string(),
+                    v2: "GET".to_string(),
+                    v3: String::new(),
+                },
+                PolicyRule {
+                    p_type: "g".to_string(),
+                    v0: "alice".to_string(),
+                    v1: "admin".to_string(),
+                    v2: String::new(),
+                    v3: String::new(),
+                },
+            ]),
+        );
+        e.set_policies(&policies, None).unwrap();
+        assert!(e
+            .is_authorized("admin", "GET", "/api/v1/anything/deep", "")
+            .unwrap());
+        assert!(!e
+            .is_authorized("alice", "GET", "/api/v1/anything", "")
+            .unwrap());
+        // projects/projects 值被宽容忽略
+        policies.insert(
+            "projects".to_string(),
+            PolicyValue::Projects(make_projects(&["p1"])),
+        );
+        assert!(e.set_policies(&policies, None).is_ok());
+    }
+
+    #[test]
+    fn policy_engine_filters() {
+        let e = PolicyEngine::new();
+        e.set_policies(&opa_policies(&[("viewer", "/api/v1/reports", "GET")]), None)
+            .unwrap();
+        let subjects = vec!["viewer".to_string(), "stranger".to_string()];
+
+        // 过滤 (资源, 动作) 对
+        let pairs = vec![
+            make_pair("/api/v1/reports", "GET"),
+            make_pair("/api/v1/reports", "DELETE"),
+            make_pair("/api/v1/users", "GET"),
+        ];
+        let allowed = e.filter_authorized_pairs(&subjects, &pairs).unwrap();
+        assert_eq!(allowed, vec![make_pair("/api/v1/reports", "GET")]);
+
+        // projects_authorized:已授权 → 全部候选;未授权 → 空
+        let projects = make_projects(&["p1", "p2"]);
+        assert_eq!(
+            e.projects_authorized(&subjects, "GET", "/api/v1/reports", &projects)
+                .unwrap(),
+            projects
+        );
+        assert!(e
+            .projects_authorized(&subjects, "DELETE", "/api/v1/reports", &projects)
+            .unwrap()
+            .is_empty());
+        // filter_authorized_projects:项目维度无策略,恒空(见类型文档)
+        assert!(e.filter_authorized_projects(&subjects).unwrap().is_empty());
+    }
+
+    #[test]
+    fn policy_engine_hot_reload_and_case_insensitive_methods() {
+        let e = PolicyEngine::new();
+        e.set_policies(&opa_policies(&[("u", "/x", "get")]), None)
+            .unwrap();
+        // 方法大小写宽容
+        assert!(e.is_authorized("u", "GET", "/x", "").unwrap());
+
+        // 热更:整体替换,旧规则消失
+        e.set_policies(&opa_policies(&[("u", "/y", "GET")]), None)
+            .unwrap();
+        assert!(!e.is_authorized("u", "GET", "/x", "").unwrap());
+        assert!(e.is_authorized("u", "GET", "/y", "").unwrap());
+    }
+
+    #[test]
+    fn builtin_engine_end_to_end_via_authorizer() {
+        // 走管理器全程:builtin 分派 → OPA 格式装载 → 判定
+        struct RoleProvider;
+        impl Provider for RoleProvider {
+            fn provide_models(&self, _engine_name: &str) -> ModelDataMap {
+                ModelDataMap::new()
+            }
+            fn provide_policies(&self) -> Result<PermissionDataMap, String> {
+                let mut m = PermissionDataMap::new();
+                m.insert(
+                    "admin".to_string(),
+                    vec![PermissionData {
+                        path: "/api/v1/**".to_string(),
+                        method: "GET".to_string(),
+                        domain: String::new(),
+                    }],
+                );
+                m.insert(
+                    "auditor".to_string(),
+                    vec![PermissionData {
+                        path: "/api/v1/audit".to_string(),
+                        method: "GET".to_string(),
+                        domain: String::new(),
+                    }],
+                );
+                Ok(m)
+            }
+        }
+        let a = Authorizer::new(Some(&EngineConfig::new("builtin")), Arc::new(RoleProvider));
+        a.reset_policies().unwrap();
+        let engine = a.engine().expect("builtin 引擎应已创建");
+        assert_eq!(engine.name(), "builtin");
+        assert!(engine
+            .is_authorized("admin", "GET", "/api/v1/users/42", "")
+            .unwrap());
+        assert!(engine
+            .is_authorized("auditor", "GET", "/api/v1/audit", "")
+            .unwrap());
+        assert!(!engine
+            .is_authorized("auditor", "GET", "/api/v1/users", "")
+            .unwrap());
+    }
+
+    #[test]
+    fn policy_engine_is_send_sync_and_hot_swappable_across_threads() {
+        // 策略热更与判定并发安全(RwLock)
+        let e = Arc::new(PolicyEngine::new());
+        e.set_policies(&opa_policies(&[("u", "/x", "GET")]), None)
+            .unwrap();
+        let reader = e.clone();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..50 {
+                assert!(reader.is_authorized("u", "GET", "/x", "").unwrap());
+            }
+        });
+        for _ in 0..50 {
+            assert!(e.is_authorized("u", "GET", "/x", "").unwrap());
+        }
+        handle.join().unwrap();
     }
 }

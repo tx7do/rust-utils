@@ -26,6 +26,20 @@ pub trait Cipher {
     fn name(&self) -> &'static str;
 }
 
+/// 统一的非对称签名接口(ECDSA / RSA / SM2 共用)。
+///
+/// 签名以 base64 文本形态进出(各算法的内部编码不同:ECDSA 为
+/// `base64(r)$base64(s)`,RSA/SM2 为 DER,格式由实现方文档背书);
+/// 验签失败一律 `Ok(false)`,格式/密钥问题才 `Err`。
+pub trait Signer {
+    /// 对数据签名,输出传输形态(base64 文本)。
+    fn sign(&self, data: &[u8]) -> Result<String, String>;
+    /// 验签。
+    fn verify(&self, data: &[u8], signature: &str) -> Result<bool, String>;
+    /// 算法名(`"ECDSA"` / `"RSA"` / `"SM2"`)。
+    fn algorithm(&self) -> &'static str;
+}
+
 fn random_bytes(n: usize) -> Result<Vec<u8>, String> {
     let mut buf = vec![0u8; n];
     getrandom::fill(&mut buf).map_err(|e| format!("generate random failed: {e}"))?;
@@ -330,8 +344,38 @@ impl RsaCipher {
             .map_err(|e| format!("export public key failed: {e}"))
     }
 
+    /// 私钥签名(RSASSA-PKCS1-v1_5 + SHA-256,输出 base64(DER))。
+    pub fn sign(&self, data: &[u8]) -> Result<String, String> {
+        use rsa::signature::{SignatureEncoding as _, Signer as _};
+        let key = rsa::pkcs1v15::SigningKey::<Sha256>::new(self.private.clone());
+        Ok(to_base64(&key.sign(data).to_vec()))
+    }
+
+    /// 公钥验签(配套 [`RsaCipher::sign`])。
+    pub fn verify(&self, data: &[u8], signature: &str) -> Result<bool, String> {
+        use rsa::signature::Verifier as _;
+        let sig_bytes = from_base64(signature)?;
+        let sig = rsa::pkcs1v15::Signature::try_from(&sig_bytes[..])
+            .map_err(|e| format!("rsa signature decode failed: {e}"))?;
+        let key =
+            rsa::pkcs1v15::VerifyingKey::<Sha256>::new(rsa::RsaPublicKey::from(&self.private));
+        Ok(key.verify(data, &sig).is_ok())
+    }
+
     /// 算法名。
     pub fn name(&self) -> &'static str {
+        "RSA"
+    }
+}
+
+impl Signer for RsaCipher {
+    fn sign(&self, data: &[u8]) -> Result<String, String> {
+        RsaCipher::sign(self, data)
+    }
+    fn verify(&self, data: &[u8], signature: &str) -> Result<bool, String> {
+        RsaCipher::verify(self, data, signature)
+    }
+    fn algorithm(&self) -> &'static str {
         "RSA"
     }
 }
@@ -414,6 +458,18 @@ impl EcdsaCipher {
 
     /// 算法名。
     pub fn name(&self) -> &'static str {
+        "ECDSA"
+    }
+}
+
+impl Signer for EcdsaCipher {
+    fn sign(&self, data: &[u8]) -> Result<String, String> {
+        EcdsaCipher::sign(self, data)
+    }
+    fn verify(&self, data: &[u8], signature: &str) -> Result<bool, String> {
+        EcdsaCipher::verify(self, data, signature)
+    }
+    fn algorithm(&self) -> &'static str {
         "ECDSA"
     }
 }
@@ -921,6 +977,53 @@ mod tests {
         assert!(verifier2.verify(b"cross verify", &sig).unwrap());
         // 坏公钥拒绝
         assert!(EcdsaCipher::from_public_key_bytes(&[0u8; 10]).is_err());
+    }
+
+    #[test]
+    fn test_rsa_sign_verify() {
+        let cipher = RsaCipher::new(2048).unwrap();
+        let sig = cipher.sign(b"rsa signed payload").unwrap();
+        assert!(!sig.is_empty());
+        assert!(cipher.verify(b"rsa signed payload", &sig).unwrap());
+        // 篡改数据 / 换数据拒绝
+        assert!(!cipher.verify(b"tampered payload", &sig).unwrap());
+        // 非法 base64 / 乱码签名报 Err 而非 false
+        assert!(cipher
+            .verify(b"rsa signed payload", "!!!not base64!!!")
+            .is_err());
+        assert!(cipher.verify(b"rsa signed payload", "GVzdA==").is_err());
+        // 签名确定性:PKCS1-v1_5 是确定性填充,同数据同签名
+        assert_eq!(cipher.sign(b"rsa signed payload").unwrap(), sig);
+    }
+
+    #[test]
+    fn test_signer_trait_dispatch() {
+        // trait object 形态:ECDSA 与 RSA 可互换地穿过同一签名面
+        let ecdsa = EcdsaCipher::new().unwrap();
+        let rsa = RsaCipher::new(2048).unwrap();
+        let signers: Vec<Box<dyn Signer>> = vec![Box::new(ecdsa), Box::new(rsa)];
+
+        for signer in &signers {
+            let data = format!("payload for {}", signer.algorithm());
+            let sig = signer.sign(data.as_bytes()).unwrap();
+            assert!(
+                signer.verify(data.as_bytes(), &sig).unwrap(),
+                "{}",
+                signer.algorithm()
+            );
+            assert!(!signer.verify(b"tampered", &sig).unwrap());
+        }
+        assert_eq!(signers[0].algorithm(), "ECDSA");
+        assert_eq!(signers[1].algorithm(), "RSA");
+
+        // ECDSA 跨实例:签名方与仅持公钥的验签方穿过同一 trait
+        let signer = EcdsaCipher::new().unwrap();
+        let verifier = EcdsaCipher::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
+        let sig = Signer::sign(&signer, b"trait cross").unwrap();
+        let boxed: Box<dyn Signer> = Box::new(verifier);
+        assert!(boxed.verify(b"trait cross", &sig).unwrap());
+        // 仅验签实例穿过 trait 同样不可签名
+        assert!(boxed.sign(b"trait cross").is_err());
     }
 
     #[test]
