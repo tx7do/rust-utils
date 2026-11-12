@@ -249,10 +249,10 @@ mod tests {
         // 主体含易混淆字符 I / O
         assert!(!is_valid_btc_address("1I FNjwLjZdSKB8nZopxhLaR8vvqaQKD3B"));
         // 长度边界:24 位(不含前缀)过短,25 / 39 合法,40 过长
-        let body25 = "1".to_string() + &"a".repeat(25);
-        let body24 = "1".to_string() + &"a".repeat(24);
-        let body39 = "3".to_string() + &"a".repeat(39);
-        let body40 = "3".to_string() + &"a".repeat(40);
+        let body25 = format!("1{}", "a".repeat(25));
+        let body24 = format!("1{}", "a".repeat(24));
+        let body39 = format!("3{}", "a".repeat(39));
+        let body40 = format!("3{}", "a".repeat(40));
         assert!(is_valid_btc_address(&body25));
         assert!(is_valid_btc_address(&body39));
         assert!(!is_valid_btc_address(&body24));

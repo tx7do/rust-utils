@@ -48,7 +48,7 @@ rust-utils = "0.1"
 | [`eventbus`] | 默认 | 进程内事件总线:订阅/发布 + 中间件链 + 多总线管理器 |
 | [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
 | [`converter`] | 默认 | REST 路径 / operationID → `resource:action` 权限码 |
-| [`authorizer`] | 默认 | 授权管理器壳:Engine 抽象 + noop/deny-all + 内置 RBAC 引擎(fail-closed) |
+| [`authorizer`] | 默认(`casbin` 引擎用 `authorizer-casbin`) | 授权管理器壳:Engine 抽象 + noop/deny-all + 内置 RBAC 引擎 + casbin 引擎(fail-closed) |
 | [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
 | [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
 | [`dateutil`] | `chrono` | 日粒度取整、区间判断 |
@@ -71,7 +71,7 @@ rust-utils = "0.1"
 | [`tls`] | `tls` | TLS 证书加载:从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
 | [`geoip`] | `geoip` | IP 归属地查询三后端:qqwry(GB18030、省/市切分)、ip2region xdb v2(向量索引+段索引二分、查询器池)、MaxMind mmdb 读取器;数据文件由调用方加载 |
 | [`translator`] | `translator` | 翻译器四后端:百度(MD5 签名)/阿里(RPC 签名)/谷歌(v1 裸端点、v2/v3 REST)/火山(HMAC-SHA256 派生链);单次请求不自动重试,请求构造与签名可离线验证 |
-| [`distlock`] | `distlock` | 分布式锁:Locker/Lock 抽象与获取选项(Redis 落地用 `distlock-redis`,兼容 bsm/redislock 线上协议;暂未提供 etcd 后端) |
+| [`distlock`] | `distlock` | 分布式锁:Locker/Lock 抽象与获取选项(Redis 落地用 `distlock-redis`,兼容 bsm/redislock 线上协议;etcd 落地用 `distlock-etcd`,lease+txn 抢锁、支持阻塞等待) |
 | [`sm`] | `sm` | 国密 SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/SM4-CBC |
 | [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP(SHA-1/256/512、6~8 位、可配窗口),`otpauth://` URI 构造与解析 |
 | [`qrcode`] | `qrcode`(PNG 用 `qrcode-png`) | QR 码:模块矩阵 + SVG + 终端块字符,解码回环已测 |
@@ -285,7 +285,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test              # 核心模块测试(零依赖)
-cargo test --all-features  # 全部模块测试(297 单测 + 28 文档测试,其中 1 例标记 ignore 不执行)
+cargo test --all-features  # 全部模块测试(1057 单测 + 60 文档测试,其中 1 例标记 ignore 不执行)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```

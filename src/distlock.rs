@@ -1,17 +1,19 @@
-//! 分布式锁(接口与获取选项为 feature `distlock`,Redis 后端为
-//! feature `distlock-redis`)。
+//! 分布式锁(接口与获取选项为 feature `distlock`;Redis 后端为
+//! feature `distlock-redis`,etcd 后端为 feature `distlock-etcd`)。
 //!
 //! 实现要点:
 //!
-//! - 当前提供 Redis 落地;暂未提供 etcd 后端。轮询等待选项
+//! - 提供 Redis 落地(兼容 bsm/redislock v0.9.4 线上协议)与 etcd 落地
+//!   (lease+txn 抢锁,keep-alive 续期,令牌比对释放);轮询等待选项
 //!   (blockWait/maxWaitTime/retryDelay)保留在接口签名的
-//!   [`LockOption`] 中,Redis 后端忽略它们;
+//!   [`LockOption`] 中,Redis 后端忽略它们,etcd 后端消费
+//!   `block_wait`/`max_wait_time`;
 //! - 错误以字符串返回;未获取到锁时返回哨兵常量
 //!   [`ERR_NOT_OBTAINED`],按字符串相等判断;
-//! - Redis 后端兼容 bsm/redislock v0.9.4 线上协议(Lua 脚本与
-//!   token 格式);TTL 查询、`Metadata`/`Token` 自定义选项、
+//! - TTL 查询、`Metadata`/`Token` 自定义选项、
 //!   `NoRetry`/`ExponentialBackoff` 等策略暂未提供;
-//! - `obtain` 以锁 TTL 为等待期限;
+//! - `obtain` 以锁 TTL 为等待期限(etcd 后端在 `block_wait` 模式下
+//!   以 `max_wait_time` 为期限);
 //! - [`Lock::start_refresh`] 返回停止句柄 [`StopHandle`];句柄
 //!   被丢弃即视作停止(信道断开,线程退出)。
 
@@ -19,6 +21,8 @@ use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+#[cfg(feature = "distlock-etcd")]
+pub mod etcd_locker;
 #[cfg(feature = "distlock-redis")]
 pub mod redis_locker;
 

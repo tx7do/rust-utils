@@ -25,7 +25,7 @@
 //! | [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
 //! | [`eventbus`] | 默认 | 进程内事件总线:订阅/发布 + 中间件链 + 多总线管理器 |
 //! | [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
-//! | [`authorizer`] | 默认 | 授权管理器壳:Engine 抽象 + noop/deny-all + 内置 RBAC 引擎(fail-closed) |
+//! | [`authorizer`] | 默认(`casbin` 用 `authorizer-casbin`) | 授权管理器壳:Engine 抽象 + noop/deny-all + 内置 RBAC 引擎 + casbin 引擎(fail-closed) |
 //! | [`converter`] | 默认 | REST 路径 / operationID → `resource:action` 权限码 |
 //! | [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
 //! | [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
@@ -47,7 +47,7 @@
 //! | [`captcha`] | `captcha`(Redis 落地用 `captcha-redis`) | 图形验证码:四类文本驱动 + 滑块/点选/旋转,自绘渲染 |
 //! | [`geoip`] | `geoip` | IP 归属地三后端:qqwry、ip2region xdb v2、MaxMind mmdb,数据由调用方加载 |
 //! | [`translator`] | `translator` | 翻译器四后端:百度/阿里/谷歌/火山,请求构造与签名可离线验证 |
-//! | [`distlock`] | `distlock`(Redis 落地用 `distlock-redis`) | 分布式锁 Locker/Lock 抽象与获取选项 |
+//! | [`distlock`] | `distlock`(Redis 落地用 `distlock-redis`,etcd 落地用 `distlock-etcd`) | 分布式锁 Locker/Lock 抽象与获取选项 |
 //! | [`tls`] | `tls` | 从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
 //! | [`fieldmask`] | `fieldmask` | 字段掩码:嵌套掩码树 + filter/prune/overwrite/validate |
 //! | [`sm`] | `sm` | 国密 SM2(C1C3C2/ASN.1)/SM3/SM4-CBC |

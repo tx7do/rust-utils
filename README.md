@@ -48,7 +48,7 @@ rust-utils = "0.1"
 | [`eventbus`] | 默认 | In-process event bus: subscribe/publish + middleware chain + multi-bus manager |
 | [`aggregator`] | default | Relation backfill (lists/trees) + parallel executor + cached batch loader |
 | [`converter`] | 默认 | REST path / operationID → `resource:action` permission code |
-| [`authorizer`] | 默认 | Authorization manager shell: Engine abstraction + noop/deny-all + built-in RBAC engine (fail-closed) |
+| [`authorizer`] | 默认 (`casbin` engine via `authorizer-casbin`) | Authorization manager shell: Engine abstraction + noop/deny-all + built-in RBAC engine + casbin engine (fail-closed) |
 | [`id`] | default (`uuid` optional) | Snowflake IDs, order IDs, machine codes (built-in SHA-256), UUID v4/v7 |
 | [`fsutil`] | default (`glob` optional) | File/path helpers |
 | [`dateutil`] | `chrono` | Day-granularity truncation, range checks |
@@ -71,7 +71,7 @@ rust-utils = "0.1"
 | [`tls`] | `tls` | TLS certificate loading: rustls server/client configs assembled from PEM files/bytes (one-way/mutual) |
 | [`geoip`] | `geoip` | IP geolocation with three backends: qqwry (GB18030, province/city splitting), ip2region xdb v2 (vector index + segment bisection, searcher pool), MaxMind mmdb reader; data files are loaded by the caller |
 | [`translator`] | `translator` | Translators for four backends: Baidu (MD5 signature) / Alibaba (RPC signature) / Google (bare v1 endpoint, v2/v3 REST) / Volc (HMAC-SHA256 derivation chain); one request per call, no automatic retry; request construction and signatures are offline-verifiable |
-| [`distlock`] | `distlock` | Distributed locks: Locker/Lock abstractions with acquire options (Redis store via `distlock-redis`, wire-compatible with the bsm/redislock protocol; no etcd backend yet) |
+| [`distlock`] | `distlock` | Distributed locks: Locker/Lock abstractions with acquire options (Redis store via `distlock-redis`, wire-compatible with the bsm/redislock protocol; etcd store via `distlock-etcd`, lease+txn acquisition with block-wait support) |
 | [`sm`] | `sm` | Chinese national crypto SM2 (C1C3C2/ASN.1 encryption & signatures) / SM3 / SM4-CBC |
 | [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP (SHA-1/256/512, 6–8 digits, configurable window), `otpauth://` URI building & parsing |
 | [`qrcode`] | `qrcode` (PNG via `qrcode-png`) | QR codes: module matrix + SVG + terminal block chars; decode roundtrip covered in tests |
@@ -281,7 +281,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test                 # core-module tests (zero-dependency)
-cargo test --all-features  # all-module tests (297 unit + 28 doc tests, 1 marked ignore)
+cargo test --all-features  # all-module tests (1057 unit + 60 doc tests, 1 marked ignore)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```

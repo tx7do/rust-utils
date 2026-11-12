@@ -18,14 +18,16 @@
 //!      策略写入空转"的放行器,而非恒拒绝;
 //!    - [`DenyAllEngine`]:上游 `deny_all_engine.go` 逐式移植,恒拒绝
 //!      (fail-closed),错误信息随每次拒绝返回。
-//! 2. **引擎类型分派**:`""` 与 `"noop"` → [`NoopEngine`];`"casbin"` /
-//!    `"opa"` / `"zanzibar"` 在 Rust 侧无引擎实现,按 fail-closed 原则统一
-//!    降级为 [`DenyAllEngine`]——与上游对"不可用/不可解析的 OPA 模型"
-//!    兜底为 denyAllEngine 的精神一致;其余未知类型按上游行为 fallthrough
-//!    到 noop。注:上游 `newEngineZanzibar` 返回 nil 引擎,这里统一改为
-//!    DenyAll——因为 Rust 侧"引擎为 None"已让位给"未配置授权"语义
-//!    (见下条),配置了引擎类型却拿不到引擎时应显式拒绝,而非表现得像
-//!    未配置。
+//! 2. **引擎类型分派**:`""` 与 `"noop"` → [`NoopEngine`];`"builtin"` →
+//!    [`PolicyEngine`](Rust 侧新增的零依赖内置 RBAC 引擎);`"casbin"` →
+//!    feature `authorizer-casbin` 启用时为真实 casbin 引擎(见 `casbin`
+//!    模块),未启用时按 fail-closed 降级 [`DenyAllEngine`];`"opa"` /
+//!    `"zanzibar"` 在 Rust 侧无引擎实现,统一降级为 [`DenyAllEngine`]——
+//!    与上游对"不可用/不可解析的 OPA 模型"兜底为 denyAllEngine 的精神
+//!    一致;其余未知类型按上游行为 fallthrough 到 noop。注:上游
+//!    `newEngineZanzibar` 返回 nil 引擎,这里统一改为 DenyAll——因为
+//!    Rust 侧"引擎为 None"已让位给"未配置授权"语义(见下条),配置了
+//!    引擎类型却拿不到引擎时应显式拒绝,而非表现得像未配置。
 //! 3. **nil config → 引擎为 None**:上游 `NewAuthorizer(nil cfg)` 保持引擎
 //!    为 nil、不静默降级为放行的 noop;Rust 侧用 `Option<Arc<dyn Engine>>`
 //!    承载同一语义([`Authorizer::engine`] 返回 `None`,`reset_policies`
@@ -78,6 +80,9 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+
+#[cfg(feature = "authorizer-casbin")]
+pub mod casbin;
 
 /// 主体标识(上游 `engine.Subject`,string)。
 pub type Subject = String;
@@ -543,6 +548,21 @@ impl Engine for PolicyEngine {
     }
 }
 
+/// `"casbin"` 类型的引擎构造:feature 启用走真实 casbin 引擎(内嵌
+/// 模型解析失败时 fail-closed 兜底 DenyAll),未启用直接 DenyAll。
+#[cfg(feature = "authorizer-casbin")]
+fn casbin_engine() -> Arc<dyn Engine> {
+    match casbin::CasbinEngine::new() {
+        Ok(e) => Arc::new(e),
+        Err(_) => Arc::new(DenyAllEngine),
+    }
+}
+
+#[cfg(not(feature = "authorizer-casbin"))]
+fn casbin_engine() -> Arc<dyn Engine> {
+    Arc::new(DenyAllEngine)
+}
+
 /// 生成 Casbin 策略(上游 `generateCasbinPolicies` 的数据变换部分)。
 ///
 /// 角色 → 权限列表 展平为 `"p"` 规则(`v0=角色, v1=路径, v2=方法,
@@ -660,14 +680,17 @@ impl Authorizer {
     /// - `""` / `"noop"` → [`NoopEngine`];
     /// - `"builtin"` → [`PolicyEngine`](Rust 侧新增的内置 RBAC 引擎,
     ///   上游无对应物——casbin/opa 生态不在时的零依赖替代);
-    /// - `"casbin"` / `"opa"` / `"zanzibar"` → [`DenyAllEngine`]
+    /// - `"casbin"` → feature `authorizer-casbin` 启用时走真实 casbin
+    ///   引擎(见 `casbin` 模块),否则 DenyAll 兜底;
+    /// - `"opa"` / `"zanzibar"` → [`DenyAllEngine`]
     ///   (fail-closed,见模块文档差异 2/4);
     /// - 未知类型 → 按上游 default fallthrough 到 noop。
     fn new_engine(cfg: &EngineConfig) -> Arc<dyn Engine> {
         match cfg.engine_type.as_str() {
             "" | "noop" => Arc::new(NoopEngine),
             "builtin" => Arc::new(PolicyEngine::new()),
-            "casbin" | "opa" | "zanzibar" => Arc::new(DenyAllEngine),
+            "casbin" => casbin_engine(),
+            "opa" | "zanzibar" => Arc::new(DenyAllEngine),
             _ => Arc::new(NoopEngine),
         }
     }
@@ -851,10 +874,10 @@ mod tests {
 
     #[test]
     fn unavailable_engine_types_become_deny_all() {
-        // 上游 casbin/opa/zanzibar 引擎在 Rust 侧不可用:按 fail-closed
+        // 上游 opa/zanzibar 引擎在 Rust 侧不可用:按 fail-closed
         // 统一降级为 deny-all(吸收上游"OPA 模型缺失 → nil、模型损坏 →
         // deny-all"的两种 fail-closed 形态,见模块文档差异 2/4)
-        for ty in ["casbin", "opa", "zanzibar"] {
+        for ty in ["opa", "zanzibar"] {
             let a = Authorizer::new(Some(&EngineConfig::new(ty)), Arc::new(StubProvider));
             let engine = a.engine().expect("引擎应已创建");
             assert_eq!(engine.name(), "deny-all", "类型 {ty} 应降级为 deny-all");
@@ -864,6 +887,19 @@ mod tests {
             let ok = engine.is_authorized("", "", "", "").unwrap_err();
             assert_eq!(ok, ERR_DENY_ALL_ENGINE);
             assert!(engine.set_policies(&PolicyMap::new(), None).is_err());
+        }
+        // casbin:feature 启用时为真实引擎(见 casbin 模块端到端测试),
+        // 未启用时同样降级 deny-all
+        let a = Authorizer::new(Some(&EngineConfig::new("casbin")), Arc::new(StubProvider));
+        let engine = a.engine().expect("引擎应已创建");
+        if cfg!(feature = "authorizer-casbin") {
+            assert_eq!(engine.name(), "casbin");
+        } else {
+            assert_eq!(engine.name(), "deny-all");
+            assert_eq!(
+                engine.is_authorized("", "", "", "").unwrap_err(),
+                ERR_DENY_ALL_ENGINE
+            );
         }
     }
 

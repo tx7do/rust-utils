@@ -48,7 +48,7 @@ rust-utils = "0.1"
 | [`eventbus`] | 默认 | プロセス内イベントバス:購読/発行 + ミドルウェアチェーン + マルチバスマネージャー |
 | [`aggregator`] | デフォルト | 関連データ紐付け(リスト/ツリー)+ 並列エグゼキュータ + キャッシュ式バッチローダ |
 | [`converter`] | 默认 | REST パス / operationID → `resource:action` 権限コード |
-| [`authorizer`] | 默认 | 認可マネージャー骨格:Engine 抽象 + noop/deny-all + 内蔵 RBAC エンジン(fail-closed) |
+| [`authorizer`] | 默认(`casbin` エンジンは `authorizer-casbin`) | 認可マネージャー骨格:Engine 抽象 + noop/deny-all + 内蔵 RBAC エンジン + casbin エンジン(fail-closed) |
 | [`id`] | デフォルト(`uuid` 任意) | Snowflake ID、注文番号、マシンコード(内蔵 SHA-256)、UUID v4/v7 |
 | [`fsutil`] | デフォルト(`glob` 任意) | ファイル/パス補助 |
 | [`dateutil`] | `chrono` | 日粒度の丸め、期間判定 |
@@ -71,7 +71,7 @@ rust-utils = "0.1"
 | [`tls`] | `tls` | TLS 証明書ロード:PEM ファイル/バイトから rustls のサーバー/クライアント設定を組立(一方向/相互) |
 | [`geoip`] | `geoip` | IP ジオロケーション 3 バックエンド:qqwry(GB18030、省/市分割)、ip2region xdb v2(ベクトルインデックス+セグメント二分探索、検索器プール)、MaxMind mmdb リーダー。データファイルは呼び出し側でロード |
 | [`translator`] | `translator` | 翻訳 4 バックエンド:百度(MD5 署名)/阿里(RPC 署名)/Google(v1 素のエンドポイント、v2/v3 REST)/火山(HMAC-SHA256 派生チェーン)。1 回のリクエストで自動リトライなし、リクエスト構築と署名はオフライン検証可能 |
-| [`distlock`] | `distlock` | 分散ロック:Locker/Lock 抽象と取得オプション(Redis 実装は `distlock-redis`、bsm/redislock プロトコルとワイヤ互換。etcd バックエンドは未提供) |
+| [`distlock`] | `distlock` | 分散ロック:Locker/Lock 抽象と取得オプション(Redis 実装は `distlock-redis`、bsm/redislock プロトコルとワイヤ互換。etcd 実装は `distlock-etcd`、lease+txn 取得、ブロック待ち対応) |
 | [`sm`] | `sm` | 中国国家暗号 SM2(C1C3C2/ASN.1 の暗号化・署名検証)/SM3/SM4-CBC |
 | [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP(SHA-1/256/512、6〜8 桁、設定可能なウィンドウ)、`otpauth://` URI の構築と解析 |
 | [`qrcode`] | `qrcode`(PNG は `qrcode-png`) | QR コード:モジュール行列 + SVG + 端末ブロック文字、デコード往復をテスト済み |
@@ -281,7 +281,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test                 # コアモジュールのテスト(ゼロ依存)
-cargo test --all-features  # 全モジュールのテスト(297 ユニット + 28 ドキュメントテスト、1 例は ignore)
+cargo test --all-features  # 全モジュールのテスト(1057 ユニット + 60 ドキュメントテスト、1 例は ignore)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```
