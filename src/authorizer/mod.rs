@@ -21,20 +21,23 @@
 //! 2. **引擎类型分派**:`""` 与 `"noop"` → [`NoopEngine`];`"builtin"` →
 //!    [`PolicyEngine`](Rust 侧新增的零依赖内置 RBAC 引擎);`"casbin"` →
 //!    feature `authorizer-casbin` 启用时为真实 casbin 引擎(见 `casbin`
-//!    模块),未启用时按 fail-closed 降级 [`DenyAllEngine`];`"opa"` /
-//!    `"zanzibar"` 在 Rust 侧无引擎实现,统一降级为 [`DenyAllEngine`]——
-//!    与上游对"不可用/不可解析的 OPA 模型"兜底为 denyAllEngine 的精神
-//!    一致;其余未知类型按上游行为 fallthrough 到 noop。注:上游
-//!    `newEngineZanzibar` 返回 nil 引擎,这里统一改为 DenyAll——因为
-//!    Rust 侧"引擎为 None"已让位给"未配置授权"语义(见下条),配置了
-//!    引擎类型却拿不到引擎时应显式拒绝,而非表现得像未配置。
+//!    模块),未启用时按 fail-closed 降级 [`DenyAllEngine`];`"opa"` →
+//!    feature `authorizer-opa` 启用时为 OPA HTTP 评引擎(见 `opa` 模块),
+//!    未启用时 DenyAll 兜底;`"zanzibar"` 无引擎实现,降级
+//!    [`DenyAllEngine`]——与上游对"不可用/不可解析的 OPA 模型"兜底为
+//!    denyAllEngine 的精神一致;其余未知类型按上游行为 fallthrough 到
+//!    noop。注:上游 `newEngineZanzibar` 返回 nil 引擎,这里统一改为
+//!    DenyAll——因为 Rust 侧"引擎为 None"已让位给"未配置授权"语义
+//!    (见下条),配置了引擎类型却拿不到引擎时应显式拒绝,而非表现得像
+//!    未配置。
 //! 3. **nil config → 引擎为 None**:上游 `NewAuthorizer(nil cfg)` 保持引擎
 //!    为 nil、不静默降级为放行的 noop;Rust 侧用 `Option<Arc<dyn Engine>>`
 //!    承载同一语义([`Authorizer::engine`] 返回 `None`,`reset_policies`
 //!    报错)。
 //! 4. **OPA 模型探测塌缩**:上游 `newEngineOPA` 会取 Provider 的
 //!    `rbac.rego` 模型(缺失 → nil 引擎;不可解析 → denyAllEngine),
-//!    Rust 侧 OPA 引擎本体不存在,模型无从加载,故 `"opa"` 一律 DenyAll,
+//!    Rust 侧策略由 OPA 服务经 bundle 自行装载(feature 启用时引擎
+//!    只做决策查询,不接 Provider 模型;未启用 feature 时 DenyAll),
 //!    上游"模型缺失/模型损坏"两分支被其吸收。
 //! 5. **上下文与日志移除**:上游的 `context.Context`、`bLogger` 日志参数
 //!    面在本 crate(纯 std、零依赖)没有对应物,签名中删除;
@@ -83,6 +86,8 @@ use std::sync::Arc;
 
 #[cfg(feature = "authorizer-casbin")]
 pub mod casbin;
+#[cfg(feature = "authorizer-opa")]
+pub mod opa;
 
 /// 主体标识(上游 `engine.Subject`,string)。
 pub type Subject = String;
@@ -245,8 +250,9 @@ pub trait Provider: Send + Sync {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EngineConfig {
     /// 引擎类型(上游字段 `Type`,因 `type` 为 Rust 保留字改名):
-    /// `"noop"` | `"casbin"` | `"opa"` | `"zanzibar"`;空串按 noop 处理,
-    /// casbin/opa/zanzibar 在 Rust 侧降级为 [`DenyAllEngine`]。
+    /// `"noop"` | `"builtin"` | `"casbin"` | `"opa"` | `"zanzibar"`;
+    /// 空串按 noop 处理;casbin/opa 由对应 feature 提供真实引擎
+    /// (未启用时与 zanzibar 一样降级 [`DenyAllEngine`])。
     pub engine_type: String,
 }
 
@@ -563,6 +569,19 @@ fn casbin_engine() -> Arc<dyn Engine> {
     Arc::new(DenyAllEngine)
 }
 
+/// `"opa"` 类型的引擎构造:feature 启用走 OPA HTTP 评引擎(端点取
+/// `OPA_ENDPOINT`/`OPA_POLICY_PATH`,决策失败 fail-closed),未启用
+/// 直接 DenyAll。
+#[cfg(feature = "authorizer-opa")]
+fn opa_engine() -> Arc<dyn Engine> {
+    Arc::new(opa::OpaEngine::from_env())
+}
+
+#[cfg(not(feature = "authorizer-opa"))]
+fn opa_engine() -> Arc<dyn Engine> {
+    Arc::new(DenyAllEngine)
+}
+
 /// 生成 Casbin 策略(上游 `generateCasbinPolicies` 的数据变换部分)。
 ///
 /// 角色 → 权限列表 展平为 `"p"` 规则(`v0=角色, v1=路径, v2=方法,
@@ -665,7 +684,10 @@ impl Authorizer {
 
         let policies = match engine.name() {
             "casbin" => generate_casbin_policies(&result),
-            "opa" | "builtin" => generate_opa_policies(&result),
+            "builtin" => generate_opa_policies(&result),
+            // casbin/opa 引擎的策略面由各自服务管理(壳不装载),
+            // noop 无需装载;详见各引擎模块文档
+            "opa" => return Ok(()),
             "noop" => return Ok(()),
             other => return Err(format!("unknown engine name: {other}")),
         };
@@ -682,15 +704,17 @@ impl Authorizer {
     ///   上游无对应物——casbin/opa 生态不在时的零依赖替代);
     /// - `"casbin"` → feature `authorizer-casbin` 启用时走真实 casbin
     ///   引擎(见 `casbin` 模块),否则 DenyAll 兜底;
-    /// - `"opa"` / `"zanzibar"` → [`DenyAllEngine`]
-    ///   (fail-closed,见模块文档差异 2/4);
+    /// - `"opa"` → feature `authorizer-opa` 启用时走 OPA HTTP 评引擎
+    ///   (见 `opa` 模块),否则 DenyAll 兜底;
+    /// - `"zanzibar"` → [`DenyAllEngine`](fail-closed,见模块文档差异 2/4);
     /// - 未知类型 → 按上游 default fallthrough 到 noop。
     fn new_engine(cfg: &EngineConfig) -> Arc<dyn Engine> {
         match cfg.engine_type.as_str() {
             "" | "noop" => Arc::new(NoopEngine),
             "builtin" => Arc::new(PolicyEngine::new()),
             "casbin" => casbin_engine(),
-            "opa" | "zanzibar" => Arc::new(DenyAllEngine),
+            "opa" => opa_engine(),
+            "zanzibar" => Arc::new(DenyAllEngine),
             _ => Arc::new(NoopEngine),
         }
     }
@@ -784,6 +808,14 @@ mod tests {
                 .clone()
                 .expect("set_policies 应已被调用")
         }
+
+        /// 未被调用 set_policies 时为 None(opa 等只读引擎的断言面)。
+        fn received_opt(&self) -> Option<PolicyMap> {
+            self.received
+                .lock()
+                .expect("探针引擎互斥锁不应中毒")
+                .clone()
+        }
     }
 
     impl Engine for RecordingEngine {
@@ -874,32 +906,34 @@ mod tests {
 
     #[test]
     fn unavailable_engine_types_become_deny_all() {
-        // 上游 opa/zanzibar 引擎在 Rust 侧不可用:按 fail-closed
-        // 统一降级为 deny-all(吸收上游"OPA 模型缺失 → nil、模型损坏 →
-        // deny-all"的两种 fail-closed 形态,见模块文档差异 2/4)
-        for ty in ["opa", "zanzibar"] {
+        // 上游 zanzibar 引擎在 Rust 侧不可用:按 fail-closed 降级 deny-all
+        // (吸收上游"OPA 模型缺失 → nil、模型损坏 → deny-all"的形态,
+        // 见模块文档差异 2/4)
+        let a = Authorizer::new(Some(&EngineConfig::new("zanzibar")), Arc::new(StubProvider));
+        let engine = a.engine().expect("引擎应已创建");
+        assert_eq!(engine.name(), "deny-all");
+        let ok = engine.is_authorized("", "", "", "").unwrap_err();
+        assert_eq!(ok, ERR_DENY_ALL_ENGINE);
+        assert!(engine.set_policies(&PolicyMap::new(), None).is_err());
+
+        // casbin/opa:feature 启用时为真实引擎(见各自模块测试),
+        // 未启用时同样降级 deny-all
+        for ty in ["casbin", "opa"] {
             let a = Authorizer::new(Some(&EngineConfig::new(ty)), Arc::new(StubProvider));
             let engine = a.engine().expect("引擎应已创建");
-            assert_eq!(engine.name(), "deny-all", "类型 {ty} 应降级为 deny-all");
-
-            // 上游 TestNewAuthorizer_OPABrokenModelDeniesAll 的契约:
-            // 拒绝判定 + 拒绝策略写入
-            let ok = engine.is_authorized("", "", "", "").unwrap_err();
-            assert_eq!(ok, ERR_DENY_ALL_ENGINE);
-            assert!(engine.set_policies(&PolicyMap::new(), None).is_err());
-        }
-        // casbin:feature 启用时为真实引擎(见 casbin 模块端到端测试),
-        // 未启用时同样降级 deny-all
-        let a = Authorizer::new(Some(&EngineConfig::new("casbin")), Arc::new(StubProvider));
-        let engine = a.engine().expect("引擎应已创建");
-        if cfg!(feature = "authorizer-casbin") {
-            assert_eq!(engine.name(), "casbin");
-        } else {
-            assert_eq!(engine.name(), "deny-all");
-            assert_eq!(
-                engine.is_authorized("", "", "", "").unwrap_err(),
-                ERR_DENY_ALL_ENGINE
-            );
+            let feature_on = match ty {
+                "casbin" => cfg!(feature = "authorizer-casbin"),
+                _ => cfg!(feature = "authorizer-opa"),
+            };
+            if feature_on {
+                assert_eq!(engine.name(), ty);
+            } else {
+                assert_eq!(engine.name(), "deny-all", "类型 {ty} 应降级为 deny-all");
+                assert_eq!(
+                    engine.is_authorized("", "", "", "").unwrap_err(),
+                    ERR_DENY_ALL_ENGINE
+                );
+            }
         }
     }
 
@@ -999,8 +1033,9 @@ mod tests {
 
     #[test]
     fn reset_policies_loads_opa_policies() {
-        // 装载路径(OPA 格式):角色 → (pattern, method) 列表
-        let probe = Arc::new(RecordingEngine::new("opa"));
+        // 装载路径(OPA 格式):角色 → (pattern, method) 列表 ——
+        // 走 builtin 引擎名(opa 引擎名是只读契约,见下一测试)
+        let probe = Arc::new(RecordingEngine::new("builtin"));
         let a = Authorizer::with_engine(probe.clone(), Arc::new(PoliciesProvider));
         assert!(a.reset_policies().is_ok());
 
@@ -1013,6 +1048,16 @@ mod tests {
                 method: "GET".to_string(),
             }])
         );
+    }
+
+    #[test]
+    fn reset_policies_opa_engine_is_noop() {
+        // opa 引擎名的策略由 OPA 服务自行装载(bundle),壳不向引擎写:
+        // reset 成功且不调 set_policies(与上游"策略在 OPA 侧"的心智一致)
+        let probe = Arc::new(RecordingEngine::new("opa"));
+        let a = Authorizer::with_engine(probe.clone(), Arc::new(PoliciesProvider));
+        assert!(a.reset_policies().is_ok());
+        assert!(probe.received_opt().is_none(), "opa 引擎不应收到策略写入");
     }
 
     #[test]

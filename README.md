@@ -48,7 +48,7 @@ rust-utils = "0.1"
 | [`eventbus`] | 默认 | In-process event bus: subscribe/publish + middleware chain + multi-bus manager |
 | [`aggregator`] | default | Relation backfill (lists/trees) + parallel executor + cached batch loader |
 | [`converter`] | 默认 | REST path / operationID → `resource:action` permission code |
-| [`authorizer`] | 默认 (`casbin` engine via `authorizer-casbin`) | Authorization manager shell: Engine abstraction + noop/deny-all + built-in RBAC engine + casbin engine (fail-closed) |
+| [`authorizer`] | 默认 (`casbin`/`opa` engines via `authorizer-casbin`/`authorizer-opa`) | Authorization manager shell: Engine abstraction + noop/deny-all + built-in RBAC engine + casbin/OPA engines (fail-closed) |
 | [`id`] | default (`uuid` optional) | Snowflake IDs, order IDs, machine codes (built-in SHA-256), UUID v4/v7 |
 | [`fsutil`] | default (`glob` optional) | File/path helpers |
 | [`dateutil`] | `chrono` | Day-granularity truncation, range checks |
@@ -57,10 +57,10 @@ rust-utils = "0.1"
 | [`name_generator`] | `name-generator` | Random nicknames and Chinese/English/Japanese names (embedded 2.5 MB dictionaries) |
 | [`slug`] | `slug` | URL slugs (unicode transliteration) |
 | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA hashing strategies + complexity validation |
-| [`ossutil`] | `ossutil` | Object-storage helpers: MIME/magic-byte → bucket & extension mapping, filename strategies, upload guards |
+| [`ossutil`] | `ossutil` | Object-storage helpers: MIME/magic-byte → bucket & extension mapping, filename strategies, upload guards, Aliyun OSS presigned URLs |
 | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2, Encryptor (`enc:` prefix) envelope, unified Cipher/Signer faces |
 | [`auditutil`] | `auditutil` | Audit log: client IP + tamper-evidence chain (deterministic hashing + ECDSA-P256 signing) |
-| [`doctext`] | `doctext` (PDF via `doctext-pdf`) | Plain-text extraction from txt/md/csv/html/docx/pdf |
+| [`doctext`] | `doctext` (PDF via `doctext-pdf`, xlsx via `doctext-xlsx`) | Plain-text extraction from txt/md/csv/html/docx/pdf/xlsx |
 | [`fieldperm`] | `fieldperm` | Field-level read/write trimming (path semantics aligned with the protoreflect behavior) |
 | [`mailer`] | `mailer` | SMTP mail: STARTTLS / implicit SSL, sender display name |
 | [`notify`] | `notify` | Multi-channel notification: webhook/IM/email/SMS/vendor push, SSRF-guarded outbound |
@@ -281,7 +281,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test                 # core-module tests (zero-dependency)
-cargo test --all-features  # all-module tests (1057 unit + 60 doc tests, 1 marked ignore)
+cargo test --all-features  # all-module tests (1080 unit + 61 doc tests, 1 marked ignore)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```

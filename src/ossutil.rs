@@ -1,4 +1,5 @@
 //! 对象存储辅助(移植自 go-utils `ossutil` 包:constants.go + utils.go),feature `ossutil`。
+//! 另含阿里云 OSS 预签名 URL(RESTful V1 签名,离线可验证,见 [`presign_oss_url`])。
 //!
 //! 覆盖能力:MIME/扩展名 → 桶名映射、MIME → 扩展名映射、魔数文件类型检测
 //! ([`detect_file_type`])、文件名生成策略(UUID / 内容 SHA-256 / HMAC-内容 /
@@ -44,7 +45,7 @@
 
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
@@ -1364,6 +1365,110 @@ pub fn is_file_directory_safe(dir: &str) -> bool {
 }
 
 // ============================================================================
+// 阿里云 OSS 预签名 URL(RESTful V1 签名;离线可验证)
+// ============================================================================
+
+/// OSS 路径编码:RFC 3986 非保留字符与 `/` 保留,其余按字节
+/// 百分号编码(签名规范串与 URL 路径同用一种编码)。
+fn oss_path_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &byte in s.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// 预签名请求参数面([`presign_oss_url_at`] / [`presign_oss_url`] 入参)。
+#[derive(Debug, Clone, Copy)]
+pub struct OssPresign<'a> {
+    /// HTTP 动作(GET/PUT/DELETE…,归一为大写)。
+    pub method: &'a str,
+    /// OSS endpoint(可带可不带 scheme;无 scheme 按 https 输出)。
+    pub endpoint: &'a str,
+    pub bucket_name: &'a str,
+    pub object_name: &'a str,
+    pub access_key_id: &'a str,
+    pub access_key_secret: &'a str,
+    /// 有效窗口,过期由 OSS 侧判定。
+    pub expires_in: Duration,
+}
+
+/// 阿里云 OSS 预签名 URL(以 `now_unix` 注入当前时间,纯函数可测)。
+///
+/// URL 形态(桶子域样式):
+/// `{scheme}://{bucket}.{host}/{object-encoded}?OSSAccessKeyId=…&Expires=…&Signature=…`
+///
+/// 签名串为 `"{VERB}\n\n\n{expires}\n/{bucket}/{object-encoded}"`
+/// (Content-Type/Content-MD5 留空 —— 预签名不预设请求头),
+/// `Signature = percent(base64(hmac-sha1(secret, string_to_sign)))`。
+pub fn presign_oss_url_at(req: OssPresign<'_>, now_unix: i64) -> Result<String, String> {
+    if req.endpoint.trim().is_empty()
+        || req.bucket_name.trim().is_empty()
+        || req.access_key_id.is_empty()
+    {
+        return Err("ossutil: presign requires endpoint/bucket/access_key_id".into());
+    }
+    if req.access_key_secret.is_empty() {
+        return Err("ossutil: presign requires access_key_secret".into());
+    }
+    if req.expires_in <= Duration::ZERO {
+        return Err("ossutil: presign expires_in must be positive".into());
+    }
+    // 规范化 host:去 scheme(输出侧再按原样保留 scheme,无 scheme 补 https)
+    let endpoint = req.endpoint.trim().trim_end_matches('/');
+    let (scheme, host) = match endpoint.split_once("://") {
+        Some((s, h)) => (s.to_string(), h.to_string()),
+        None => ("https".to_string(), endpoint.to_string()),
+    };
+    if host.is_empty() {
+        return Err("ossutil: presign endpoint host is empty".into());
+    }
+    let bucket = req.bucket_name.trim_matches('/');
+    let object = oss_path_encode(req.object_name.trim_start_matches('/'));
+    if object.is_empty() {
+        return Err("ossutil: presign object must not be empty".into());
+    }
+    let verb = req.method.trim().to_ascii_uppercase();
+    if verb.is_empty() {
+        return Err("ossutil: presign method must not be empty".into());
+    }
+    let expires = now_unix
+        .checked_add(req.expires_in.as_secs() as i64)
+        .ok_or_else(|| "ossutil: presign expires overflow".to_string())?;
+
+    let canonical = format!("/{bucket}/{object}");
+    let string_to_sign = format!("{verb}\n\n\n{expires}\n{canonical}");
+    let mut mac = <Hmac<sha1::Sha1> as Mac>::new_from_slice(req.access_key_secret.as_bytes())
+        .expect("hmac accepts any key");
+    mac.update(string_to_sign.as_bytes());
+    let sig_b64 = crate::base64util::encode(&mac.finalize().into_bytes());
+
+    Ok(format!(
+        "{scheme}://{bucket}.{host}/{object}?OSSAccessKeyId={ak}&Expires={expires}&Signature={sig}",
+        // AK 为查询参数值,按分量编码('/' 也要转义;签名值只转义 + / =)
+        ak = oss_path_encode(req.access_key_id).replace('/', "%2F"),
+        sig = sig_b64
+            .replace('+', "%2B")
+            .replace('/', "%2F")
+            .replace('=', "%3D"),
+    ))
+}
+
+/// 阿里云 OSS 预签名 URL(内部取当前时间)。
+pub fn presign_oss_url(req: OssPresign<'_>) -> Result<String, String> {
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    presign_oss_url_at(req, now_unix)
+}
+
+// ============================================================================
 // 测试(移植上游 ossutil_test.go,并补充魔数/嗅探用例)
 // ============================================================================
 
@@ -1819,5 +1924,135 @@ mod tests {
             ALLOWED_EXACT_MIME_TYPES[ALLOWED_EXACT_MIME_TYPES.len() - 1],
             "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         );
+    }
+
+    // ---- 预签名 URL(签名向量以 python hmac 独立复核钉死) ----
+
+    #[test]
+    fn oss_presign_signature_vector() {
+        // 签名串 "GET\n\n\n1767225600\n/my-bucket/a/b.txt"、密钥 "test-secret"
+        // 的期望签名以 openssl/python hmac-sha1 独立计算钉死
+        let url = presign_oss_url_at(
+            OssPresign {
+                method: "GET",
+                endpoint: "https://oss-cn-hangzhou.aliyuncs.com",
+                bucket_name: "my-bucket",
+                object_name: "a/b.txt",
+                access_key_id: "test-ak",
+                access_key_secret: "test-secret",
+                expires_in: std::time::Duration::from_secs(300),
+            },
+            1767225300,
+        )
+        .unwrap();
+        assert_eq!(
+        url,
+        "https://my-bucket.oss-cn-hangzhou.aliyuncs.com/a/b.txt?OSSAccessKeyId=test-ak&Expires=1767225600&Signature=ljY3kVffSJBII9vxJ4CAEI5iSxs%3D"
+    );
+    }
+
+    #[test]
+    fn oss_presign_put_and_encoding() {
+        // PUT + 对象名空格转义 + 无 scheme 端点补 https
+        // 签名串 "PUT\n\n\n1700000000\n/bkt/dir/file%20name.txt"(编码后的
+        // 对象名参与签名)、密钥 "another-secret"
+        let url = presign_oss_url_at(
+            OssPresign {
+                method: "put",
+                endpoint: "oss-cn-beijing.aliyuncs.com",
+                bucket_name: "bkt",
+                object_name: "dir/file name.txt",
+                access_key_id: "ak",
+                access_key_secret: "another-secret",
+                expires_in: std::time::Duration::from_secs(60),
+            },
+            1699999940,
+        )
+        .unwrap();
+        assert_eq!(
+        url,
+        "https://bkt.oss-cn-beijing.aliyuncs.com/dir/file%20name.txt?OSSAccessKeyId=ak&Expires=1700000000&Signature=lfzREGv8u%2F3me6y6ZHlKV3yWNmk%3D"
+    );
+        // URL 带 scheme 时的 http 保留
+        let url = presign_oss_url_at(
+            OssPresign {
+                method: "GET",
+                endpoint: "http://oss.example.com",
+                bucket_name: "bkt",
+                object_name: "x",
+                access_key_id: "ak",
+                access_key_secret: "sec",
+                expires_in: std::time::Duration::from_secs(60),
+            },
+            100,
+        )
+        .unwrap();
+        assert!(
+            url.starts_with("http://bkt.oss.example.com/x?"),
+            "url={url}"
+        );
+    }
+
+    #[test]
+    fn oss_presign_rejects_invalid_input() {
+        let valid = OssPresign {
+            method: "GET",
+            endpoint: "oss-cn-hangzhou.aliyuncs.com",
+            bucket_name: "bkt",
+            object_name: "obj",
+            access_key_id: "ak",
+            access_key_secret: "sec",
+            expires_in: std::time::Duration::from_secs(60),
+        };
+        // 空 endpoint / 空 bucket / 空 AK / 空 secret / 非正 expires / 空 object / 空 method
+        let bad = |f: &dyn Fn(&mut OssPresign)| {
+            let mut r = valid;
+            f(&mut r);
+            presign_oss_url_at(r, 100).is_err()
+        };
+        assert!(bad(&|r| r.endpoint = ""));
+        assert!(bad(&|r| r.bucket_name = ""));
+        assert!(bad(&|r| r.access_key_id = ""));
+        assert!(bad(&|r| r.access_key_secret = ""));
+        assert!(bad(&|r| r.expires_in = Duration::ZERO));
+        assert!(bad(&|r| r.object_name = ""));
+        assert!(bad(&|r| r.method = "  "));
+        // method 归一大写
+        let url = presign_oss_url_at(
+            OssPresign {
+                method: " get ",
+                ..valid
+            },
+            100,
+        )
+        .unwrap();
+        assert!(url.contains("Expires=160"), "url={url}");
+    }
+
+    #[test]
+    fn oss_presign_now_wrapper() {
+        // 走系统时钟的包装:形态正确且 Expires 在未来
+        let url = presign_oss_url(OssPresign {
+            method: "GET",
+            endpoint: "oss.example.com",
+            bucket_name: "bkt",
+            object_name: "x",
+            access_key_id: "ak",
+            access_key_secret: "sec",
+            expires_in: std::time::Duration::from_secs(600),
+        })
+        .unwrap();
+        assert!(url.contains("OSSAccessKeyId=ak&"), "url={url}");
+        let expires: i64 = url
+            .split("&Expires=")
+            .nth(1)
+            .and_then(|s| s.split('&').next())
+            .and_then(|s| s.parse().ok())
+            .unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        assert!(expires > now, "Expires 应在未来");
     }
 }

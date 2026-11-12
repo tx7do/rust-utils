@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # etcd live 测试的端点(distlock-etcd 的实例测试在可达时自动执行)
+  ETCD_ENDPOINTS: http://127.0.0.1:2379
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      etcd:
+        image: gcr.io/etcd-development/etcd:v3.5.21
+        cmd:
+          - etcd
+          - --listen-client-urls=http://0.0.0.0:2379
+          - --advertise-client-urls=http://127.0.0.1:2379
+        ports:
+          - 2379:2379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy(全部 feature 与目标,警告即失败)
+        run: cargo clippy --all-features --all-targets -- -D warnings
+      - name: 测试(全部 feature;geoip 资产缺失时相关用例自动跳过)
+        run: cargo test --all-features
+      - name: 示例编译
+        run: cargo build --examples --all-features
+      - name: 基准编译(--test 冒烟,不计时)
+        run: cargo bench --features qrcode,jwt,mapper --bench sensitive --bench qrcode --bench jwt --bench mapper -- --test

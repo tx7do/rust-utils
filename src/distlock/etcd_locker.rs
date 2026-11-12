@@ -20,13 +20,15 @@
 //! `Locker`/`Lock` 仍为同步面。
 
 use std::future::Future;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use etcd_client::{Client, Compare, CompareOp, PutOptions, Txn, TxnOp};
 
-use crate::distlock::{Lock, LockOption, Locker, OnRefreshError, StopHandle, ERR_NOT_OBTAINED};
+use crate::distlock::{
+    compose_lock_value, BackoffRunner, Lock, LockOption, Locker, OnRefreshError, StopHandle,
+    ERR_NOT_OBTAINED,
+};
 
 const DEFAULT_TTL: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_RETRIES: i64 = 10;
@@ -82,62 +84,6 @@ fn block_on<T>(fut: impl Future<Output = T>) -> Result<T, String> {
         .get()
         .map(|rt| rt.block_on(fut))
         .ok_or_else(|| "etcdlock: runtime init".to_string())
-}
-
-/// 随机令牌(16 随机字节 → raw-base64url,与 Redis 后端同款)。
-fn random_token() -> String {
-    let mut buf = [0u8; 16];
-    getrandom::fill(&mut buf).expect("getrandom");
-    base64_rawurl_encode(&buf)
-}
-
-/// raw-base64url 编码(URL 安全字母表、无填充)。
-fn base64_rawurl_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        out.push(ALPHABET[(n >> 18 & 63) as usize] as char);
-        out.push(ALPHABET[(n >> 12 & 63) as usize] as char);
-        if chunk.len() > 1 {
-            out.push(ALPHABET[(n >> 6 & 63) as usize] as char);
-        }
-        if chunk.len() > 2 {
-            out.push(ALPHABET[(n & 63) as usize] as char);
-        }
-    }
-    out
-}
-
-/// 线性退避(恒定间隔)。
-struct LinearBackoff(Duration);
-
-impl LinearBackoff {
-    fn next_backoff(&self) -> Duration {
-        self.0
-    }
-}
-
-/// 限次重试(计数达到上限后归零)。
-struct LimitedRetry {
-    inner: LinearBackoff,
-    cnt: AtomicI64,
-    max: i64,
-}
-
-impl LimitedRetry {
-    fn next_backoff(&self) -> Duration {
-        if self.cnt.load(Ordering::Relaxed) >= self.max {
-            return Duration::ZERO;
-        }
-        self.cnt.fetch_add(1, Ordering::Relaxed);
-        self.inner.next_backoff()
-    }
 }
 
 /// 已获取的 etcd 锁。
@@ -196,6 +142,23 @@ impl LockInner {
         .and_then(|inner| inner)
     }
 
+    /// 剩余有效期:lease_time_to_live 取剩余秒;租约失效(-1)报错。
+    fn run_ttl(&self) -> Result<Duration, String> {
+        block_on(async {
+            let mut client = self.client.clone();
+            let resp = client
+                .lease_time_to_live(self.lease_id, None)
+                .await
+                .map_err(|e| format!("etcdlock: time to live: {e}"))?;
+            if resp.ttl() >= 0 {
+                Ok(Duration::from_secs(resp.ttl() as u64))
+            } else {
+                Err("etcdlock: not obtained".to_string())
+            }
+        })
+        .and_then(|inner| inner)
+    }
+
     /// 释放:事务(值等于令牌 → 删除),成功后回收租约。
     fn run_release(&self) -> Result<(), String> {
         block_on(async {
@@ -234,6 +197,10 @@ impl Lock for EtcdLock {
 
     fn refresh(&self) -> Result<(), String> {
         self.inner.run_refresh()
+    }
+
+    fn ttl(&self) -> Result<Duration, String> {
+        self.inner.run_ttl()
     }
 
     fn start_refresh(&self, on_error: Option<OnRefreshError>) -> StopHandle {
@@ -328,12 +295,14 @@ impl EtcdLocker {
 
 impl Locker for EtcdLocker {
     fn obtain(&self, key: &str, opts: &[LockOption]) -> Result<Box<dyn Lock>, String> {
-        // 函数选项仅 block_wait 在本后端生效(等待期限以内持续重试)
+        // 锁值 = 令牌(自定义或随机)+ 元数据;重试策略自 LockConfig
+        // (Linear/Exponential/NoRetry);block_wait 模式以 max_wait_time
+        // 为等待期限,其余以锁 TTL 为界
         let mut cfg = crate::distlock::default_lock_config();
         for opt in opts {
             opt(&mut cfg);
         }
-        let token = random_token();
+        let (token, _token_len) = compose_lock_value(cfg.token.as_deref(), cfg.metadata.as_deref());
         let ttl_secs = (self.opts.ttl.as_secs().max(1)) as i64;
         // 等待期限:阻塞模式用 max_wait_time(0 按 TTL 兜底),否则锁 TTL
         let wait = if cfg.block_wait && cfg.max_wait_time > Duration::ZERO {
@@ -342,11 +311,17 @@ impl Locker for EtcdLocker {
             self.opts.ttl
         };
         let deadline = Instant::now().checked_add(wait);
-        let retry = LimitedRetry {
-            inner: LinearBackoff(self.opts.retry_delay),
-            cnt: AtomicI64::new(0),
-            max: self.opts.max_retries,
+        let retry_delay = if cfg.retry_delay > Duration::ZERO {
+            cfg.retry_delay
+        } else {
+            self.opts.retry_delay
         };
+        let mut backoff = BackoffRunner::new(
+            cfg.backoff,
+            retry_delay,
+            self.opts.ttl,
+            self.opts.max_retries,
+        );
         loop {
             if let Some(lease_id) = self.try_obtain(key, &token, ttl_secs)? {
                 return Ok(Box::new(EtcdLock {
@@ -359,7 +334,7 @@ impl Locker for EtcdLocker {
                     }),
                 }));
             }
-            let backoff = retry.next_backoff();
+            let backoff = backoff.next();
             if backoff < Duration::from_millis(1) {
                 return Err(ERR_NOT_OBTAINED.to_string());
             }
@@ -392,7 +367,7 @@ impl Locker for EtcdLocker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn etcd_options_defaults() {
@@ -413,16 +388,13 @@ mod tests {
 
     #[test]
     fn etcd_token_rawurl() {
-        // raw-base64url 向量与令牌形态(与 Redis 后端同款)
-        assert_eq!(base64_rawurl_encode(&[0u8; 16]), "AAAAAAAAAAAAAAAAAAAAAA");
-        assert_eq!(
-            base64_rawurl_encode(&(0u8..16).collect::<Vec<u8>>()),
-            "AAECAwQFBgcICQoLDA0ODw"
-        );
-        let a = random_token();
-        let b = random_token();
-        assert_eq!(a.len(), 22);
-        assert_ne!(a, b);
+        // raw-base64url 向量已收敛到 distlock 共用层;此处钉死锁值合成
+        let (value, token_len) = compose_lock_value(None, None);
+        assert_eq!(value.len(), 22);
+        assert_eq!(token_len, 22);
+        let (value, token_len) = compose_lock_value(Some("tok"), Some("|meta"));
+        assert_eq!(value, "tok|meta");
+        assert_eq!(token_len, 3);
     }
 
     #[test]
@@ -601,5 +573,72 @@ mod tests {
         }
         handle.stop();
         assert!(hit.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn etcd_live_ttl_and_options() {
+        let Some(locker) = live_locker(Options {
+            ttl: Duration::from_secs(10),
+            ..Default::default()
+        }) else {
+            return;
+        };
+        // ttl():持锁期在 (0, TTL] 内
+        let lock = locker
+            .obtain(
+                "rust-utils/etcd/ttl",
+                &[crate::distlock::with_token("fixed-tok")],
+            )
+            .unwrap();
+        let remaining = lock.ttl().unwrap();
+        assert!(remaining <= Duration::from_secs(10));
+        assert!(remaining > Duration::ZERO, "持锁期应还有剩余");
+        // 锁值 = 自定义令牌(经 etcdctl 可查,这里以获取探测证明值已落)
+        let err = locker.obtain("rust-utils/etcd/ttl", &[]).err().unwrap();
+        assert_eq!(err, ERR_NOT_OBTAINED);
+        lock.release().unwrap();
+        // 释放后 ttl 报错(租约已回收)
+        assert!(lock.ttl().is_err());
+
+        // NoRetry:争抢失败立即返回哨兵(不重试不等待)
+        let holder = locker.obtain("rust-utils/etcd/noretry", &[]).unwrap();
+        let t0 = Instant::now();
+        let err = locker
+            .obtain(
+                "rust-utils/etcd/noretry",
+                &[crate::distlock::with_backoff(
+                    crate::distlock::Backoff::NoRetry,
+                )],
+            )
+            .err()
+            .unwrap();
+        assert_eq!(err, ERR_NOT_OBTAINED);
+        assert!(
+            t0.elapsed() < Duration::from_millis(500),
+            "NoRetry 应即时返回"
+        );
+        holder.release().unwrap();
+    }
+
+    #[test]
+    fn etcd_live_metadata_value_composition() {
+        // 元数据附加到锁值:同一令牌 + 不同元数据 = 不同锁值,
+        // 释放以完整锁值比对
+        let Some(locker) = live_locker(Options::default()) else {
+            return;
+        };
+        let lock = locker
+            .obtain(
+                "rust-utils/etcd/meta",
+                &[
+                    crate::distlock::with_token("tok"),
+                    crate::distlock::with_metadata("|node-1"),
+                ],
+            )
+            .unwrap();
+        // 释放成功(完整锁值 tok|node-1 比对命中)
+        lock.release().unwrap();
+        // 二次释放失败
+        assert_eq!(lock.release().unwrap_err(), "etcdlock: lock not held");
     }
 }

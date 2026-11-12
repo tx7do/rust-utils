@@ -48,7 +48,7 @@ rust-utils = "0.1"
 | [`eventbus`] | 默认 | 进程内事件总线:订阅/发布 + 中间件链 + 多总线管理器 |
 | [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
 | [`converter`] | 默认 | REST 路径 / operationID → `resource:action` 权限码 |
-| [`authorizer`] | 默认(`casbin` 引擎用 `authorizer-casbin`) | 授权管理器壳:Engine 抽象 + noop/deny-all + 内置 RBAC 引擎 + casbin 引擎(fail-closed) |
+| [`authorizer`] | 默认(`casbin`/`opa` 引擎分别用 `authorizer-casbin`/`authorizer-opa`) | 授权管理器壳:Engine 抽象 + noop/deny-all + 内置 RBAC 引擎 + casbin/OPA 引擎(fail-closed) |
 | [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
 | [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
 | [`dateutil`] | `chrono` | 日粒度取整、区间判断 |
@@ -57,10 +57,10 @@ rust-utils = "0.1"
 | [`name_generator`] | `name-generator` | 随机昵称与中英日姓名(内嵌 2.5 MB 词库) |
 | [`slug`] | `slug` | URL slug(unicode 转写) |
 | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 + 复杂度校验 |
-| [`ossutil`] | `ossutil` | 对象存储辅助:MIME/魔数→桶与扩展名、文件名策略、上传守卫 |
+| [`ossutil`] | `ossutil` | 对象存储辅助:MIME/魔数→桶与扩展名、文件名策略、上传守卫、阿里云 OSS 预签名 URL |
 | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、Encryptor(`enc:` 前缀)信封、统一 Cipher/Signer 签名面 |
 | [`auditutil`] | `auditutil` | 审计日志:客户端 IP + 篡改证据链(确定性哈希 + ECDSA-P256 签名) |
-| [`doctext`] | `doctext`(PDF 用 `doctext-pdf`) | txt/md/csv/html/docx/pdf 纯文本提取 |
+| [`doctext`] | `doctext`(PDF 用 `doctext-pdf`,xlsx 用 `doctext-xlsx`) | txt/md/csv/html/docx/pdf/xlsx 纯文本提取 |
 | [`fieldperm`] | `fieldperm` | 字段级读写裁剪(路径语义对齐 protoreflect 行为) |
 | [`mailer`] | `mailer` | SMTP 邮件:STARTTLS / 隐式 SSL,发件人显示名 |
 | [`notify`] | `notify` | 多渠道通知:webhook/IM/邮件/SMS/vendor push,SSRF 防线出站 |
@@ -285,7 +285,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test              # 核心模块测试(零依赖)
-cargo test --all-features  # 全部模块测试(1057 单测 + 60 文档测试,其中 1 例标记 ignore 不执行)
+cargo test --all-features  # 全部模块测试(1080 单测 + 61 文档测试,其中 1 例标记 ignore 不执行)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```

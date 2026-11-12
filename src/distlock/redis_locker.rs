@@ -12,8 +12,10 @@
 //! 覆盖协议文本、令牌、选项与策略、续期线程的停止语义,以及
 //! 无监听端点的错误透传。
 
-use crate::distlock::{Lock, LockOption, Locker, OnRefreshError, StopHandle, ERR_NOT_OBTAINED};
-use std::sync::atomic::{AtomicI64, Ordering};
+use crate::distlock::{
+    compose_lock_value, BackoffRunner, Lock, LockOption, Locker, OnRefreshError, StopHandle,
+    ERR_NOT_OBTAINED,
+};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -67,63 +69,7 @@ impl Options {
     }
 }
 
-/// 线性退避(恒定间隔)。
-struct LinearBackoff(Duration);
-
-impl LinearBackoff {
-    fn next_backoff(&self) -> Duration {
-        self.0
-    }
-}
-
-/// 限次重试(计数达到上限后归零)。
-struct LimitedRetry {
-    inner: LinearBackoff,
-    cnt: AtomicI64,
-    max: i64,
-}
-
-impl LimitedRetry {
-    fn next_backoff(&self) -> Duration {
-        if self.cnt.load(Ordering::Relaxed) >= self.max {
-            return Duration::ZERO;
-        }
-        self.cnt.fetch_add(1, Ordering::Relaxed);
-        self.inner.next_backoff()
-    }
-}
-
-/// 随机令牌(16 随机字节 → raw-base64url)。
-fn random_token() -> String {
-    let mut buf = [0u8; 16];
-    getrandom::fill(&mut buf).expect("getrandom");
-    base64_rawurl_encode(&buf)
-}
-
-/// raw-base64url 编码(URL 安全字母表、无填充)。
-fn base64_rawurl_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        out.push(ALPHABET[(n >> 18 & 63) as usize] as char);
-        out.push(ALPHABET[(n >> 12 & 63) as usize] as char);
-        if chunk.len() > 1 {
-            out.push(ALPHABET[(n >> 6 & 63) as usize] as char);
-        }
-        if chunk.len() > 2 {
-            out.push(ALPHABET[(n & 63) as usize] as char);
-        }
-    }
-    out
-}
-
-/// 已获取的 Redis 锁(不设元数据,锁值即令牌)。
+/// 已获取的 Redis 锁(锁值 = 令牌 + 可选元数据)。
 pub struct RedisLock {
     inner: Arc<LockInner>,
 }
@@ -168,6 +114,21 @@ impl LockInner {
         }
         Err("redislock: lock not held".to_string())
     }
+
+    /// 查询剩余有效期(PTTL):毫秒数直取;-1 无过期(不应出现)、
+    /// -2 键不存在,均按错误返回。
+    fn run_ttl(&self) -> Result<Duration, String> {
+        let mut con = self.client.get_connection().map_err(|e| e.to_string())?;
+        let ms: i64 = redis::cmd("PTTL")
+            .arg(self.key.as_str())
+            .query(&mut con)
+            .map_err(|e| e.to_string())?;
+        match ms {
+            m if m >= 0 => Ok(Duration::from_millis(m as u64)),
+            -1 => Err("redislock: no expire".to_string()),
+            _ => Err("redislock: not obtained".to_string()),
+        }
+    }
 }
 
 impl Lock for RedisLock {
@@ -182,6 +143,10 @@ impl Lock for RedisLock {
 
     fn refresh(&self) -> Result<(), String> {
         self.inner.run_refresh_script()
+    }
+
+    fn ttl(&self) -> Result<Duration, String> {
+        self.inner.run_ttl()
     }
 
     fn start_refresh(&self, on_error: Option<OnRefreshError>) -> StopHandle {
@@ -226,15 +191,22 @@ impl RedisLocker {
     }
 
     /// 运行获取脚本(status 应答 → 拿到;nil 应答 → 未拿到
-    /// 继续退避;其余为底层错误)。
-    fn run_obtain_script(&self, key: &str, value: &str, ttl_ms: i64) -> Result<bool, String> {
+    /// 继续退避;其余为底层错误)。`token_len` 为重入前缀比对界
+    /// (锁值 = 令牌 + 元数据,元数据不参与重入)。
+    fn run_obtain_script(
+        &self,
+        key: &str,
+        value: &str,
+        token_len: usize,
+        ttl_ms: i64,
+    ) -> Result<bool, String> {
         let mut con = self.client.get_connection().map_err(|e| e.to_string())?;
         // Option<()>:脚本返回 nil 映射为 None(未拿到),
         // status 应答映射为 Some(())(拿到)
         let outcome = redis::Script::new(LUA_OBTAIN)
             .key(key)
             .arg(value)
-            .arg(value.len())
+            .arg(token_len)
             .arg(ttl_ms.to_string())
             .invoke::<Option<()>>(&mut con)
             .map_err(|e| e.to_string())?;
@@ -243,19 +215,35 @@ impl RedisLocker {
 }
 
 impl Locker for RedisLocker {
-    fn obtain(&self, key: &str, _opts: &[LockOption]) -> Result<Box<dyn Lock>, String> {
-        // 每次尝试的锁值为随机令牌(无元数据),TTL 以毫秒串
-        // 传入脚本;重试为线性退避限次,期限以 TTL 为界
-        let value = random_token();
-        let ttl_ms = self.opts.ttl.as_millis() as i64;
-        let deadline = Instant::now().checked_add(self.opts.ttl);
-        let retry = LimitedRetry {
-            inner: LinearBackoff(self.opts.retry_delay),
-            cnt: AtomicI64::new(0),
-            max: self.opts.max_retries,
+    fn obtain(&self, key: &str, opts: &[LockOption]) -> Result<Box<dyn Lock>, String> {
+        // 锁值 = 令牌(自定义或随机)+ 元数据;重试策略自 LockConfig
+        // (Linear/Exponential/NoRetry),期限以锁 TTL 为界,
+        // block_wait 模式以 max_wait_time 为界
+        let mut cfg = crate::distlock::default_lock_config();
+        for opt in opts {
+            opt(&mut cfg);
+        }
+        let (value, token_len) = compose_lock_value(cfg.token.as_deref(), cfg.metadata.as_deref());
+        let retry_delay = if cfg.retry_delay > Duration::ZERO {
+            cfg.retry_delay
+        } else {
+            self.opts.retry_delay
         };
+        let wait = if cfg.block_wait && cfg.max_wait_time > Duration::ZERO {
+            cfg.max_wait_time
+        } else {
+            self.opts.ttl
+        };
+        let ttl_ms = self.opts.ttl.as_millis() as i64;
+        let deadline = Instant::now().checked_add(wait);
+        let mut backoff = BackoffRunner::new(
+            cfg.backoff,
+            retry_delay,
+            self.opts.ttl,
+            self.opts.max_retries,
+        );
         loop {
-            if self.run_obtain_script(key, &value, ttl_ms)? {
+            if self.run_obtain_script(key, &value, token_len, ttl_ms)? {
                 return Ok(Box::new(RedisLock {
                     inner: Arc::new(LockInner {
                         client: self.client.clone(),
@@ -268,7 +256,7 @@ impl Locker for RedisLocker {
             }
             // 重试预算耗尽 → 未获取哨兵;期限已到 → ctx 到期
             // 错误文案
-            let backoff = retry.next_backoff();
+            let backoff = backoff.next();
             if backoff < Duration::from_millis(1) {
                 return Err(ERR_NOT_OBTAINED.to_string());
             }
@@ -301,7 +289,7 @@ impl Locker for RedisLocker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn redis_options_defaults() {
@@ -385,43 +373,28 @@ if redis.call(\"getrange\", KEYS[1], 0, offset-1) == string.sub(ARGV[1], 1, offs
 
     #[test]
     fn redis_token_rawurl() {
-        // 独立预计算的 raw-base64url 向量
-        assert_eq!(base64_rawurl_encode(&[0u8; 16]), "AAAAAAAAAAAAAAAAAAAAAA");
-        assert_eq!(
-            base64_rawurl_encode(&(0u8..16).collect::<Vec<u8>>()),
-            "AAECAwQFBgcICQoLDA0ODw"
-        );
-        // 令牌:22 字符且两次采样不同
-        let a = random_token();
-        let b = random_token();
-        assert_eq!(a.len(), 22);
-        assert_eq!(b.len(), 22);
-        assert_ne!(a, b);
+        // raw-base64url 编码向量已收敛到 distlock 共用层(见其单测);
+        // 此处钉死锁值合成与令牌长度约定
+        let (value, token_len) = compose_lock_value(None, None);
+        assert_eq!(value.len(), 22);
+        assert_eq!(token_len, 22);
+        let (value, token_len) = compose_lock_value(Some("tok"), Some("|meta"));
+        assert_eq!(value, "tok|meta");
+        assert_eq!(token_len, 3);
     }
 
     #[test]
-    fn redis_retry_strategies() {
-        // 线性退避恒定
-        let linear = LinearBackoff(Duration::from_millis(5));
-        assert_eq!(linear.next_backoff(), Duration::from_millis(5));
-        assert_eq!(linear.next_backoff(), Duration::from_millis(5));
-        // 限次策略:预算内取内层间隔,耗尽后归零
-        let limited = LimitedRetry {
-            inner: LinearBackoff(Duration::from_millis(5)),
-            cnt: AtomicI64::new(0),
-            max: 2,
-        };
-        assert_eq!(limited.next_backoff(), Duration::from_millis(5));
-        assert_eq!(limited.next_backoff(), Duration::from_millis(5));
-        assert_eq!(limited.next_backoff(), Duration::ZERO);
-        assert_eq!(limited.next_backoff(), Duration::ZERO);
-        // 零预算:立即归零
-        let exhausted = LimitedRetry {
-            inner: LinearBackoff(Duration::from_millis(5)),
-            cnt: AtomicI64::new(0),
-            max: 0,
-        };
-        assert_eq!(exhausted.next_backoff(), Duration::ZERO);
+    fn redis_obtain_script_uses_token_prefix_len() {
+        // 获取脚本的重入分支参数是令牌长度(锁值 = 令牌 + 元数据)
+        // —— 通过死端点验证调用透传,协议文本另测
+        let client = redis::Client::open("redis://127.0.0.1:1/").unwrap();
+        let locker = RedisLocker::new(client, Options::default());
+        let err = locker
+            .run_obtain_script("k", "tok|meta", 3, 1_000)
+            .err()
+            .unwrap();
+        assert!(!err.is_empty());
+        assert_ne!(err, ERR_NOT_OBTAINED);
     }
 
     fn dead_lock(interval: Duration) -> RedisLock {

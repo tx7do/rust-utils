@@ -97,12 +97,14 @@ sqlutil = []
 # REST 路径 / operationID 到 resource:action 权限码映射(纯 std)。
 converter = []
 # 对象存储辅助:MIME/魔数到桶与扩展名、文件名策略、上传守卫。
-ossutil = ["dep:getrandom", "dep:sha2", "dep:hmac"]
+ossutil = ["dep:getrandom", "dep:sha2", "dep:hmac", "dep:sha1"]
 # SMTP 邮件发送(STARTTLS + 隐式 SSL),基于 lettre。
 mailer = ["dep:lettre"]
-# 纯文本提取:txt/md/csv/html/docx(zip+xml);PDF 单独开 `doctext-pdf`。
+# 纯文本提取:txt/md/csv/html/docx(zip+xml);PDF 单独开 `doctext-pdf`,
+# xlsx 复用 `xlsx` 模块(`doctext-xlsx`)。
 doctext = ["dep:zip", "dep:quick-xml"]
 doctext-pdf = ["doctext", "dep:pdf-extract"]
+doctext-xlsx = ["doctext", "xlsx"]
 # 审计日志:客户端 IP 提取 + 篡改证据链(确定性 prost 序列化哈希 + ECDSA-P256 DER 签名)。
 auditutil = ["dep:prost", "dep:p256", "dep:sha2"]
 # 授权管理器壳:Engine 抽象 + noop/deny-all 引擎 + 策略装载(fail-closed)。
@@ -159,6 +161,10 @@ mapper = ["dep:serde_json", "dep:serde"]
 authorizer-casbin = ["authorizer", "dep:casbin", "dep:tokio"]
 # etcd 落地(lease+txn 抢锁;消费 block_wait 选项)。
 distlock-etcd = ["distlock", "dep:etcd-client", "dep:tokio", "dep:getrandom"]
+# protobuf 时间转换(chrono ↔ prost_types Timestamp/Duration;copierutil 对位)。
+prost-time = ["chrono", "dep:prost-types"]
+# OPA 引擎落地(authorizer 的 "opa" 类型,HTTP 评 /v1/data;未启用时 DenyAll 兜底)。
+authorizer-opa = ["authorizer", "dep:ureq", "dep:serde", "dep:serde_json"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
@@ -209,6 +215,7 @@ calamine = { version = "0.38", optional = true }
 # runtime-tokio 为 casbin 内部 cfg 所需(即便只用内存适配器也须开)
 casbin = { version = "2", default-features = false, features = ["runtime-tokio"], optional = true }
 etcd-client = { version = "0.14", optional = true }
+prost-types = { version = "0.14", optional = true }
 
 # 基准测试(仅 `cargo bench` 时编译);关闭默认特性以精简依赖,
 # 只保留 cargo bench 所需的 cargo_bench_support。
@@ -303,6 +310,25 @@ harness = false
 [[bench]]
 name = "parsers"
 harness = false
+
+[[bench]]
+name = "sensitive"
+harness = false
+
+[[bench]]
+name = "qrcode"
+harness = false
+required-features = ["qrcode"]
+
+[[bench]]
+name = "jwt"
+harness = false
+required-features = ["jwt"]
+
+[[bench]]
+name = "mapper"
+harness = false
+required-features = ["mapper"]
 
 # Crate-wide lint policy: no unsafe code, period.
 [lints.rust]

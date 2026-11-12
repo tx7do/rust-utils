@@ -7,7 +7,10 @@
 //!   替换无效 UTF-8),原样返回;
 //! - `docx`(zip 容器 + `word/document.xml` XML 解析,`doctext` feature);
 //! - `pdf`(抽取文本层,非 OCR,`doctext-pdf` feature;关闭该 feature 时 pdf
-//!   扩展名直接返回"需要启用 `doctext-pdf`"类错误)。
+//!   扩展名直接返回"需要启用 `doctext-pdf`"类错误);
+//! - `xlsx`(表格文本化,`doctext-xlsx` feature,复用 `xlsx` 模块;每表一段,
+//!   行内单元格制表符相连、行尾空单元格剪掉,表间以 `[sheet]` 名行分隔;
+//!   关闭该 feature 时 xlsx 扩展名按不支持拒绝)。
 //!
 //! 其余扩展名直接拒绝——宁可报"不支持"也不要把二进制乱码灌进向量库。
 //!
@@ -94,6 +97,8 @@ pub enum DocTextError {
     /// pdf 提取失败(解析失败、无文本层、未启用 `doctext-pdf` feature 等),
     /// 携带内层原因。
     Pdf(String),
+    /// xlsx 提取失败(打开失败、坏容器等,`xlsx` feature)。
+    Xlsx(String),
     /// 不支持的扩展名(已小写化,含点)。
     Unsupported(String),
 }
@@ -108,6 +113,7 @@ impl std::fmt::Display for DocTextError {
             DocTextError::NoTextExtracted => write!(f, "no text content extracted"),
             DocTextError::Docx(inner) => write!(f, "docx extract: {inner}"),
             DocTextError::Pdf(inner) => write!(f, "pdf extract: {inner}"),
+            DocTextError::Xlsx(inner) => write!(f, "xlsx extract: {inner}"),
             DocTextError::Unsupported(ext) => write!(
                 f,
                 "unsupported file type {ext:?} (supported: {})",
@@ -119,8 +125,9 @@ impl std::fmt::Display for DocTextError {
 
 impl std::error::Error for DocTextError {}
 
-/// 支持的扩展名清单(管理页提示用)。恒含 `.pdf`,即使 `doctext-pdf` feature
-/// 未启用——清单描述的是"这套 API 认识什么",而不是"当前构建能解什么"。
+/// 支持的扩展名清单(管理页提示用)。恒含 `.pdf` 与 `.xlsx`,即使
+/// `doctext-pdf`/`xlsx` feature 未启用——清单描述的是"这套 API 认识什么",
+/// 而不是"当前构建能解什么"。
 pub fn supported_extensions() -> &'static [&'static str] {
     &[
         ".txt",
@@ -136,6 +143,7 @@ pub fn supported_extensions() -> &'static [&'static str] {
         ".htm",
         ".docx",
         ".pdf",
+        ".xlsx",
     ]
 }
 
@@ -154,6 +162,8 @@ pub fn extract(file_name: &str, data: &[u8]) -> Result<String, DocTextError> {
     match ext.as_str() {
         ".docx" => extract_docx(data),
         ".pdf" => extract_pdf(data),
+        #[cfg(feature = "xlsx")]
+        ".xlsx" => extract_xlsx(data),
         _ if PLAIN_TEXT_EXTS.contains(&ext.as_str()) => {
             let text = sanitize_text(data);
             if text.trim().is_empty() {
@@ -162,6 +172,61 @@ pub fn extract(file_name: &str, data: &[u8]) -> Result<String, DocTextError> {
             Ok(text)
         }
         _ => Err(DocTextError::Unsupported(ext)),
+    }
+}
+
+/// xlsx → 文本(feature `xlsx`):每表一段,行内单元格以制表符相连,
+/// 行尾空单元格剪掉;表间以 `[sheet]` 名行分隔。单元格形态与
+/// [`crate::xlsx::Cell`] 一致:错误值以 Display 文本、日期以串行数
+/// 字符串落文。
+#[cfg(feature = "xlsx")]
+fn extract_xlsx(data: &[u8]) -> Result<String, DocTextError> {
+    let sheets = crate::xlsx::read_all(data).map_err(DocTextError::Xlsx)?;
+    let mut out = String::new();
+    let mut any_row = false;
+    for (i, sheet) in sheets.iter().enumerate() {
+        // 表间以空行分隔(首表前不留)
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push('[');
+        out.push_str(&sheet.name);
+        out.push_str("]\n");
+        for row in &sheet.rows {
+            // 行尾空单元格剪掉,行中间的空单元格保留制表位
+            let mut last = row.len();
+            while last > 0 && row[last - 1].is_empty() {
+                last -= 1;
+            }
+            for (i, cell) in row[..last].iter().enumerate() {
+                if i > 0 {
+                    out.push('\t');
+                }
+                out.push_str(&cell_text(cell));
+            }
+            out.push('\n');
+            any_row = true;
+        }
+    }
+    // 所有表都无数据行(只有表名行)视作无文本
+    if !any_row {
+        return Err(DocTextError::NoTextExtracted);
+    }
+    Ok(out)
+}
+
+/// 单元格 → 文本(错误值/日期同样转字符串形态落文)。
+#[cfg(feature = "xlsx")]
+fn cell_text(cell: &crate::xlsx::Cell) -> String {
+    use crate::xlsx::Cell;
+    match cell {
+        Cell::Empty => String::new(),
+        Cell::Int(n) => n.to_string(),
+        Cell::Float(f) => f.to_string(),
+        Cell::Str(s) => s.clone(),
+        Cell::Bool(b) => b.to_string(),
+        Cell::Err(e) => e.clone(),
+        Cell::DateTime(s) => s.clone(),
     }
 }
 
@@ -507,6 +572,7 @@ mod tests {
                 ".htm",
                 ".docx",
                 ".pdf",
+                ".xlsx",
             ]
         );
     }
@@ -710,5 +776,59 @@ mod tests {
         assert_eq!(to_valid_utf8(b"ok\xe4\xb8"), "ok\u{FFFD}");
         // 合法串原样
         assert_eq!(to_valid_utf8("世界".as_bytes()), "世界");
+    }
+
+    // ---- xlsx(feature `doctext-xlsx`;未启用时按不支持拒绝) ----
+
+    #[cfg(feature = "xlsx")]
+    fn sample_xlsx() -> Vec<u8> {
+        use crate::xlsx::{SheetOut, XlsxValue};
+        let mut sheet = SheetOut::new("用户");
+        sheet.push_header(vec![
+            XlsxValue::from("姓名"),
+            XlsxValue::from("年龄"),
+            XlsxValue::from("激活"),
+        ]);
+        sheet.push_row(vec![
+            XlsxValue::from("小明"),
+            XlsxValue::Int(18),
+            XlsxValue::Bool(true),
+        ]);
+        // 行尾空单元格:文本化时剪掉
+        sheet.push_row(vec![
+            XlsxValue::from("小红"),
+            XlsxValue::Empty,
+            XlsxValue::Empty,
+        ]);
+        let mut orders = SheetOut::new("订单");
+        orders.push_row(vec![XlsxValue::from("A-001"), XlsxValue::Float(19.99)]);
+        crate::xlsx::write_to_bytes(&[sheet, orders]).unwrap()
+    }
+
+    #[cfg(feature = "xlsx")]
+    #[test]
+    fn test_extract_xlsx_text() {
+        let bytes = sample_xlsx();
+        let text = extract("报表.xlsx", &bytes).unwrap();
+        let expect = "[用户]\n姓名\t年龄\t激活\n小明\t18\ttrue\n小红\n\n[订单]\nA-001\t19.99\n";
+        assert_eq!(text, expect);
+        // 扩展名大小写不敏感
+        assert!(extract("报表.XLSX", &bytes).is_ok());
+        // 坏容器报 Xlsx 内层错误
+        let err = extract("broken.xlsx", b"not a zip").unwrap_err();
+        assert!(err.to_string().contains("xlsx extract"), "err={err}");
+        // 全空表 → 无文本
+        let empty = crate::xlsx::write_to_bytes(&[crate::xlsx::SheetOut::new("空")]).unwrap();
+        assert!(matches!(
+            extract("empty.xlsx", &empty),
+            Err(DocTextError::NoTextExtracted)
+        ));
+    }
+
+    #[cfg(not(feature = "xlsx"))]
+    #[test]
+    fn test_xlsx_unsupported_without_feature() {
+        // feature 关闭时 xlsx 按不支持拒绝(清单仍列出,语义见其文档)
+        assert!(extract("a.xlsx", b"x").is_err());
     }
 }

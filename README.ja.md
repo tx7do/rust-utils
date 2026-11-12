@@ -48,7 +48,7 @@ rust-utils = "0.1"
 | [`eventbus`] | 默认 | プロセス内イベントバス:購読/発行 + ミドルウェアチェーン + マルチバスマネージャー |
 | [`aggregator`] | デフォルト | 関連データ紐付け(リスト/ツリー)+ 並列エグゼキュータ + キャッシュ式バッチローダ |
 | [`converter`] | 默认 | REST パス / operationID → `resource:action` 権限コード |
-| [`authorizer`] | 默认(`casbin` エンジンは `authorizer-casbin`) | 認可マネージャー骨格:Engine 抽象 + noop/deny-all + 内蔵 RBAC エンジン + casbin エンジン(fail-closed) |
+| [`authorizer`] | 默认(`casbin`/`opa` エンジンは `authorizer-casbin`/`authorizer-opa`) | 認可マネージャー骨格:Engine 抽象 + noop/deny-all + 内蔵 RBAC エンジン + casbin/OPA エンジン(fail-closed) |
 | [`id`] | デフォルト(`uuid` 任意) | Snowflake ID、注文番号、マシンコード(内蔵 SHA-256)、UUID v4/v7 |
 | [`fsutil`] | デフォルト(`glob` 任意) | ファイル/パス補助 |
 | [`dateutil`] | `chrono` | 日粒度の丸め、期間判定 |
@@ -57,10 +57,10 @@ rust-utils = "0.1"
 | [`name_generator`] | `name-generator` | ランダムニックネームと中英日の氏名(内蔵 2.5 MB 辞書) |
 | [`slug`] | `slug` | URL slug(Unicode 音訳) |
 | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA ハッシュ戦略 + 複雑度検証 |
-| [`ossutil`] | `ossutil` | オブジェクトストレージ補助:MIME/マジックバイト→バケット・拡張子マッピング、ファイル名戦略、アップロードガード |
+| [`ossutil`] | `ossutil` | オブジェクトストレージ補助:MIME/マジックバイト→バケット・拡張子マッピング、ファイル名戦略、アップロードガード、阿里云 OSS プレ署名 URL |
 | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、Encryptor(`enc:` プレフィックス)エンベロープ、統一 Cipher/Signer 署名面 |
 | [`auditutil`] | `auditutil` | 監査ログ:クライアント IP + 改ざん検知チェーン(決定論的ハッシュ + ECDSA-P256 署名) |
-| [`doctext`] | `doctext`(PDF は `doctext-pdf`) | txt/md/csv/html/docx/pdf からのプレーンテキスト抽出 |
+| [`doctext`] | `doctext`(PDF は `doctext-pdf`、xlsx は `doctext-xlsx`) | txt/md/csv/html/docx/pdf/xlsx からのプレーンテキスト抽出 |
 | [`fieldperm`] | `fieldperm` | フィールド単位の読み書きトリミング(protoreflect の挙動に沿ったパス意味論) |
 | [`mailer`] | `mailer` | SMTP メール:STARTTLS / 暗黙 SSL、送信者表示名 |
 | [`notify`] | `notify` | マルチチャネル通知:webhook/IM/メール/SMS/ベンダープッシュ、SSRF 防護付き送信 |
@@ -281,7 +281,7 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test                 # コアモジュールのテスト(ゼロ依存)
-cargo test --all-features  # 全モジュールのテスト(1057 ユニット + 60 ドキュメントテスト、1 例は ignore)
+cargo test --all-features  # 全モジュールのテスト(1080 ユニット + 61 ドキュメントテスト、1 例は ignore)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```

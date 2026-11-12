@@ -25,7 +25,7 @@
 //! | [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
 //! | [`eventbus`] | 默认 | 进程内事件总线:订阅/发布 + 中间件链 + 多总线管理器 |
 //! | [`aggregator`] | 默认 | 关联数据回填(列表/树)+ 并行执行器 + 缓存式批量加载 |
-//! | [`authorizer`] | 默认(`casbin` 用 `authorizer-casbin`) | 授权管理器壳:Engine 抽象 + noop/deny-all + 内置 RBAC 引擎 + casbin 引擎(fail-closed) |
+//! | [`authorizer`] | 默认(`casbin`/`opa` 引擎分别用 `authorizer-casbin`/`authorizer-opa`) | 授权管理器壳:Engine 抽象 + noop/deny-all + 内置 RBAC 引擎 + casbin/OPA 引擎(fail-closed) |
 //! | [`converter`] | 默认 | REST 路径 / operationID → `resource:action` 权限码 |
 //! | [`id`] | 默认(`uuid` 可选) | 雪花 ID、订单号、机器码(内置 SHA-256)、UUID v4/v7 |
 //! | [`fsutil`] | 默认(`glob` 可选) | 文件/路径辅助 |
@@ -34,11 +34,11 @@
 //! | [`random`] | `rand` | 随机工具:加权/别名表/骰子/抖动/正态/手机号等 |
 //! | [`name_generator`] | `name-generator` | 随机昵称与中英日姓名(内嵌词库) |
 //! | [`slug`] | `slug` | URL slug(unicode 转写) |
-//! | [`ossutil`] | `ossutil` | 对象存储辅助:MIME/魔数→桶与扩展名、文件名策略、上传守卫 |
+//! | [`ossutil`] | `ossutil` | 对象存储辅助:MIME/魔数→桶与扩展名、文件名策略、上传守卫、阿里云 OSS 预签名 URL |
 //! | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 + 复杂度校验 |
 //! | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、Encryptor 信封、统一 Cipher/Signer 签名面 |
 //! | [`auditutil`] | `auditutil` | 审计日志:客户端 IP + 篡改证据链(prost 哈希 + ECDSA 签名) |
-//! | [`doctext`] | `doctext`(PDF 用 `doctext-pdf`) | txt/md/csv/html/docx/pdf 纯文本提取 |
+//! | [`doctext`] | `doctext`(PDF 用 `doctext-pdf`,xlsx 用 `doctext-xlsx`) | txt/md/csv/html/docx/pdf/xlsx 纯文本提取 |
 //! | [`fieldperm`] | `fieldperm` | 字段级读写裁剪(路径语义对齐 protoreflect 行为) |
 //! | [`mailer`] | `mailer` | SMTP 邮件:STARTTLS / 隐式 SSL,发件人显示名 |
 //! | [`notify`] | `notify` | 多渠道通知:webhook/IM/SMS/vendor push,SSRF 防线出站 |
@@ -47,7 +47,7 @@
 //! | [`captcha`] | `captcha`(Redis 落地用 `captcha-redis`) | 图形验证码:四类文本驱动 + 滑块/点选/旋转,自绘渲染 |
 //! | [`geoip`] | `geoip` | IP 归属地三后端:qqwry、ip2region xdb v2、MaxMind mmdb,数据由调用方加载 |
 //! | [`translator`] | `translator` | 翻译器四后端:百度/阿里/谷歌/火山,请求构造与签名可离线验证 |
-//! | [`distlock`] | `distlock`(Redis 落地用 `distlock-redis`,etcd 落地用 `distlock-etcd`) | 分布式锁 Locker/Lock 抽象与获取选项 |
+//! | [`distlock`] | `distlock`(Redis 落地用 `distlock-redis`,etcd 落地用 `distlock-etcd`) | 分布式锁 Locker/Lock 抽象:获取选项(阻塞等待/自定义令牌/元数据/三种退避)、剩余 TTL 查询、后台续期 |
 //! | [`tls`] | `tls` | 从 PEM 文件/字节组装 rustls 服务端/客户端配置(单向/双向) |
 //! | [`fieldmask`] | `fieldmask` | 字段掩码:嵌套掩码树 + filter/prune/overwrite/validate |
 //! | [`sm`] | `sm` | 国密 SM2(C1C3C2/ASN.1)/SM3/SM4-CBC |
@@ -57,6 +57,7 @@
 //! | [`code_generator`] | `code-generator` | 模板驱动代码生成:mustache 子集渲染(缺字段即报错)+ 落盘守卫 |
 //! | [`mapper`] | `mapper` | entity↔DTO 字段映射:rename/嵌套搬移/枚举转换/缺省/白名单 |
 //! | [`printrender`] | `printrender` | HTML/URL → PDF(页边距/缩放/页眉脚/页码范围)与 PNG/JPEG 截图 |
+//! | [`prost_time`] | `prost-time` | protobuf 时间转换:chrono ↔ prost_types Timestamp/Duration(fail-fast) |
 
 #![allow(clippy::module_inception)]
 
@@ -84,12 +85,13 @@ pub mod stringutil;
 #[cfg(feature = "bank-card")]
 pub mod bank_card;
 
-// 标准 base64(带填充),供 captcha/crypto/sm/translator 模块共用。
+// 标准 base64(带填充),供 captcha/crypto/sm/translator/ossutil 模块共用。
 #[cfg(any(
     feature = "captcha",
     feature = "crypto",
     feature = "sm",
-    feature = "translator"
+    feature = "translator",
+    feature = "ossutil"
 ))]
 pub(crate) mod base64util {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -119,6 +121,8 @@ pub(crate) mod base64util {
         out
     }
 
+    /// ossutil 单 feature 下仅 encode 被消费,decode 保留给其余门控模块
+    #[allow(dead_code)]
     pub fn decode(s: &str) -> Result<Vec<u8>, String> {
         let mut vals = Vec::with_capacity(s.len());
         for c in s.bytes() {
@@ -188,6 +192,8 @@ pub mod otp;
 pub mod password;
 #[cfg(feature = "printrender")]
 pub mod printrender;
+#[cfg(feature = "prost-time")]
+pub mod prost_time;
 #[cfg(feature = "qrcode")]
 pub mod qrcode;
 #[cfg(feature = "rand")]
