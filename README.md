@@ -56,6 +56,7 @@ rust-utils = "0.1"
 | [`random`] | `rand` | Random toolkit: weighted choice/alias table/dice/jitter/gaussian/phone numbers, etc. |
 | [`name_generator`] | `name-generator` | Random nicknames and Chinese/English/Japanese names (embedded 2.5 MB dictionaries) |
 | [`slug`] | `slug` | URL slugs (unicode transliteration) |
+| [`structutil`] | `structutil` | Struct field traversal: serde-flavored ForEach/ToMap (rename/skip semantics carried by serde attributes) |
 | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA hashing strategies + complexity validation |
 | [`ossutil`] | `ossutil` | Object-storage helpers: MIME/magic-byte → bucket & extension mapping, filename strategies, upload guards, Aliyun OSS presigned URLs |
 | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2, Encryptor (`enc:` prefix) envelope, unified Cipher/Signer faces |
@@ -100,6 +101,7 @@ rust-utils = "0.1"
 [`random`]: src/random.rs
 [`name_generator`]: src/name_generator.rs
 [`slug`]: src/slug.rs
+[`structutil`]: src/structutil.rs
 [`password`]: src/password.rs
 [`crypto`]: src/crypto.rs
 [`converter`]: src/converter.rs

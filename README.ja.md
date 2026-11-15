@@ -56,6 +56,7 @@ rust-utils = "0.1"
 | [`random`] | `rand` | 乱数ツール:重み付き選択/エイリアステーブル/サイコロ/ジッタ/正規分布/電話番号など |
 | [`name_generator`] | `name-generator` | ランダムニックネームと中英日の氏名(内蔵 2.5 MB 辞書) |
 | [`slug`] | `slug` | URL slug(Unicode 音訳) |
+| [`structutil`] | `structutil` | 構造体フィールド走査:serde 版 ForEach/ToMap(rename/skip は serde 属性が担う) |
 | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA ハッシュ戦略 + 複雑度検証 |
 | [`ossutil`] | `ossutil` | オブジェクトストレージ補助:MIME/マジックバイト→バケット・拡張子マッピング、ファイル名戦略、アップロードガード、阿里云 OSS プレ署名 URL |
 | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、Encryptor(`enc:` プレフィックス)エンベロープ、統一 Cipher/Signer 署名面 |
@@ -100,6 +101,7 @@ rust-utils = "0.1"
 [`random`]: src/random.rs
 [`name_generator`]: src/name_generator.rs
 [`slug`]: src/slug.rs
+[`structutil`]: src/structutil.rs
 [`password`]: src/password.rs
 [`crypto`]: src/crypto.rs
 [`converter`]: src/converter.rs

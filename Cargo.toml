@@ -28,6 +28,8 @@ rand = ["dep:rand"]
 uuid = ["dep:uuid"]
 # URL slug generation with unicode transliteration.
 slug = ["dep:slug"]
+# 结构体字段遍历(serde 版 ForEach/ToMap,对位上游 structutil)。
+structutil = ["dep:serde_json", "dep:serde"]
 # Password hashing strategies: PBKDF2 / bcrypt / argon2 / HMAC / SHA-2 / RSA / ECDSA / ECDH.
 password = [
     "dep:pbkdf2",
@@ -148,6 +150,7 @@ full = [
     "qrcode",
     "xlsx",
     "mapper",
+    "structutil",
     "code-generator",
 ]
 

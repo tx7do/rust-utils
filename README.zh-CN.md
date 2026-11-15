@@ -56,6 +56,7 @@ rust-utils = "0.1"
 | [`random`] | `rand` | 随机工具:加权/别名表/骰子/抖动/正态/手机号等 |
 | [`name_generator`] | `name-generator` | 随机昵称与中英日姓名(内嵌 2.5 MB 词库) |
 | [`slug`] | `slug` | URL slug(unicode 转写) |
+| [`structutil`] | `structutil` | 结构体字段遍历:serde 版 ForEach/ToMap(rename/skip 语义由 serde 属性承载) |
 | [`password`] | `password` | PBKDF2/bcrypt/argon2/HMAC/SHA 哈希策略 + 复杂度校验 |
 | [`ossutil`] | `ossutil` | 对象存储辅助:MIME/魔数→桶与扩展名、文件名策略、上传守卫、阿里云 OSS 预签名 URL |
 | [`crypto`] | `crypto` | AES-CBC/AES-GCM/HMAC/SHA-2、Encryptor(`enc:` 前缀)信封、统一 Cipher/Signer 签名面 |
@@ -100,6 +101,7 @@ rust-utils = "0.1"
 [`random`]: src/random.rs
 [`name_generator`]: src/name_generator.rs
 [`slug`]: src/slug.rs
+[`structutil`]: src/structutil.rs
 [`password`]: src/password.rs
 [`crypto`]: src/crypto.rs
 [`converter`]: src/converter.rs
