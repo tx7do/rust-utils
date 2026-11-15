@@ -20,10 +20,10 @@ Design principles:
 
 ```toml
 [dependencies]
-rust-utils = "0.1"
+rust-utils = "0.2"
 
 # Enable features as needed, e.g.:
-# rust-utils = { version = "0.1", features = ["chrono", "rand", "password"] }
+# rust-utils = { version = "0.2", features = ["chrono", "rand", "password"] }
 # or everything: features = ["full"]
 ```
 

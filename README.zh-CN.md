@@ -20,10 +20,10 @@ Rust 工具箱:命名风格转换、切片/映射辅助、雪花 ID、订单号�
 
 ```toml
 [dependencies]
-rust-utils = "0.1"
+rust-utils = "0.2"
 
 # 按需启用 feature,例如:
-# rust-utils = { version = "0.1", features = ["chrono", "rand", "password"] }
+# rust-utils = { version = "0.2", features = ["chrono", "rand", "password"] }
 # 或全量:features = ["full"]
 ```
 

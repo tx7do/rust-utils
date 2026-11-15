@@ -20,10 +20,10 @@ Rust 製ツールボックス:命名スタイル変換、スライス/マップ�
 
 ```toml
 [dependencies]
-rust-utils = "0.1"
+rust-utils = "0.2"
 
 # 必要な feature を有効化、例:
-# rust-utils = { version = "0.1", features = ["chrono", "rand", "password"] }
+# rust-utils = { version = "0.2", features = ["chrono", "rand", "password"] }
 # または全量: features = ["full"]
 ```
 
