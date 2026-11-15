@@ -1,0 +1,68 @@
+name: Release
+
+# 发布流程:推 `v*` tag 即自动发布到 crates.io。
+# 前置条件(一次性):仓库 Settings → Secrets and variables → Actions
+# 配置 CARGO_REGISTRY_TOKEN(crates.io 设置页生成,仅 publish 权限)。
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+  ETCD_ENDPOINTS: http://127.0.0.1:2379
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      etcd:
+        image: gcr.io/etcd-development/etcd:v3.5.21
+        cmd:
+          - etcd
+          - --listen-client-urls=http://0.0.0.0:2379
+          - --advertise-client-urls=http://127.0.0.1:2379
+        ports:
+          - 2379:2379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # tag 版本必须与 Cargo.toml 一致(v0.2.0 ↔ version = "0.2.0")
+      - name: 校验 tag 与 Cargo.toml 版本一致
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "tag v$TAG_VERSION 与 Cargo.toml $CARGO_VERSION 不一致"
+            exit 1
+          fi
+          echo "releasing rust-utils v$CARGO_VERSION"
+
+      # 发布前跑全量测试(etcd/redis services 在上,锁后端 live 测试真实执行)
+      - name: 全量测试
+        run: cargo test --all-features
+
+      - name: 发布到 crates.io
+        run: cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+
+      # 发布失败时,把打好的 .crate 留在 artifacts 便于人工排查
+      - name: 归档 .crate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crate
+          path: target/package/*.crate
+          if-no-files-found: ignore

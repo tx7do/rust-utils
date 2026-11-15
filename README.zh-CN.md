@@ -287,10 +287,18 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test              # 核心模块测试(零依赖)
-cargo test --all-features  # 全部模块测试(1080 单测 + 61 文档测试,其中 1 例标记 ignore 不执行)
+cargo test --all-features  # 全部模块测试(1085 单测 + 62 文档测试,其中 1 例标记 ignore 不执行)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```
+
+## 发布
+
+CI 在收到 `v*` tag 时自动发布到 crates.io(`.github/workflows/release.yml`):
+
+1. 一次性配置 `CARGO_REGISTRY_TOKEN` secret(crates.io → Settings → Tokens,仅 publish 权限);
+2. 提升 Cargo.toml 的 `version` 并更新 CHANGELOG.md;
+3. `git tag v0.2.0 && git push origin v0.2.0` —— CI 校验 tag 与 Cargo.toml 一致,对真实 redis/etcd 跑全量测试后发布。
 
 ## License
 

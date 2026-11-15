@@ -283,10 +283,18 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test                 # core-module tests (zero-dependency)
-cargo test --all-features  # all-module tests (1080 unit + 61 doc tests, 1 marked ignore)
+cargo test --all-features  # all-module tests (1085 unit + 62 doc tests, 1 marked ignore)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```
+
+## Release
+
+CI publishes to crates.io on `v*` tags (`.github/workflows/release.yml`):
+
+1. Configure the `CARGO_REGISTRY_TOKEN` secret once (crates.io → Settings → Tokens, publish-only);
+2. Bump `version` in Cargo.toml + update CHANGELOG.md;
+3. `git tag v0.2.0 && git push origin v0.2.0` — tag/Cargo.toml consistency is checked, full tests run against live redis/etcd, then the crate is published.
 
 ## License
 

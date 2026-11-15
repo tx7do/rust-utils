@@ -283,10 +283,18 @@ assert_eq!(calls.load(Ordering::Relaxed), 1);
 
 ```bash
 cargo test                 # コアモジュールのテスト(ゼロ依存)
-cargo test --all-features  # 全モジュールのテスト(1080 ユニット + 61 ドキュメントテスト、1 例は ignore)
+cargo test --all-features  # 全モジュールのテスト(1085 ユニット + 62 ドキュメントテスト、1 例は ignore)
 cargo clippy --all-features --all-targets
 cargo fmt
 ```
+
+## リリース
+
+CI は `v*` タグの push で crates.io へ自動公開します(`.github/workflows/release.yml`):
+
+1. `CARGO_REGISTRY_TOKEN` シークレットを一度だけ設定(crates.io → Settings → Tokens、publish 権限のみ);
+2. Cargo.toml の `version` を上げ、CHANGELOG.md を更新;
+3. `git tag v0.2.0 && git push origin v0.2.0` —— CI がタグと Cargo.toml の一致を検証し、実 redis/etcd に対して全量テストを通してから公開します。
 
 ## License
 
