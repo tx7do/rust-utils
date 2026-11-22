@@ -56,7 +56,7 @@ crypto = [
     "dep:serde_json",
 ]
 # OTP(RFC 4226 HOTP / RFC 6238 TOTP 三摘要、otpauth:// URI)与 RFC 4648 base32 编解码。
-otp = ["dep:hmac", "dep:sha1", "dep:sha2"]
+otp = ["dep:hmac", "dep:sha1", "dep:sha2", "dep:getrandom"]
 # JWT generate / parse / verify / refresh, built on jsonwebtoken.
 jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json", "dep:getrandom"]
 # HTML → PDF 渲染（本机 Chrome/Edge CDP 驱动，自动探测安装路径）。

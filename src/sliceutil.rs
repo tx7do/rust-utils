@@ -194,11 +194,37 @@ pub fn filter_blacklist<T: Eq + std::hash::Hash + Clone>(data: &[T], blacklist: 
     data.iter().filter(|x| !bm.contains(x)).cloned().collect()
 }
 
+/// [`number_slice_to_string`] 的元素约束:全部有符号/无符号整型位宽。
+///
+/// 上游 Go 版以 `~int|~int8|…|~uint64` 泛型约束收窄;Rust 没有"整数全家"
+/// 内建 trait,用宏逐位宽挂实现达到同一收窄效果(比 Go 版多出 128 位/usize)。
+pub trait NumberToString {
+    /// 十进制字符串形态。
+    fn to_decimal_string(&self) -> String;
+}
+
+macro_rules! impl_number_to_string {
+    ($($t:ty),* $(,)?) => {
+        $(
+            impl NumberToString for $t {
+                fn to_decimal_string(&self) -> String {
+                    self.to_string()
+                }
+            }
+        )*
+    };
+}
+
+impl_number_to_string!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+
 /// 把数字切片格式化为逗号分隔的十进制字符串。
-pub fn number_slice_to_string(numbers: &[u32]) -> String {
+///
+/// 泛型约束覆盖全部有符号/无符号整型位宽(各项目不同的 ID 位宽口径都能
+/// 直接传;对位上游 NumberSliceToString 的泛型化)。
+pub fn number_slice_to_string<T: NumberToString>(numbers: &[T]) -> String {
     numbers
         .iter()
-        .map(|v| v.to_string())
+        .map(NumberToString::to_decimal_string)
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -220,8 +246,26 @@ mod tests {
             vec!["a", "b"]
         );
         assert_eq!(number_slice_to_string(&[1, 20, 300]), "1,20,300");
-        assert_eq!(number_slice_to_string(&[]), "");
+        assert_eq!(number_slice_to_string::<u32>(&[]), "");
         assert_eq!(number_slice_to_string(&[7]), "7");
+    }
+
+    #[test]
+    fn test_number_slice_to_string_generic_widths() {
+        // 有符号/无符号各位宽口径均正确(与上游测试同款断言)
+        assert_eq!(number_slice_to_string(&[4i64, 5, 6]), "4,5,6");
+        assert_eq!(number_slice_to_string(&[7i32, 8]), "7,8");
+        assert_eq!(number_slice_to_string(&[-1i64, 2]), "-1,2");
+        assert_eq!(number_slice_to_string(&[u64::MAX]), "18446744073709551615");
+        assert_eq!(number_slice_to_string(&[u8::MAX, 0u8]), "255,0");
+        assert_eq!(number_slice_to_string(&[-128i8]), "-128");
+        // 位宽口径随手换:同一个调用点换 ID 类型无需改代码
+        let ids32 = [1u32, 2, 3];
+        let ids64 = [1u64, 2, 3];
+        assert_eq!(
+            number_slice_to_string(&ids32),
+            number_slice_to_string(&ids64)
+        );
     }
 
     #[test]

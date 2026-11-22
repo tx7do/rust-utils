@@ -3,7 +3,7 @@
 本项目的所有重要变更记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [0.2.0] - 2026-11-15
+## [0.2.0] - 2026-11-22
 
 相对 0.1.0 的主体是一次大扩容:对齐上游 go-utils 全部模块清单,并把若干「壳」升级为带真实后端与真实实例测试的落地。
 
@@ -26,6 +26,11 @@
 - **authorizer**:内置 `PolicyEngine`(纯 std RBAC:角色传递闭包带环保护、`/*`/`/**` 路径通配、RwLock 热更)
 - **ossutil**:阿里云 OSS 预签名 URL(RESTful V1 签名,HMAC-SHA1,离线可验证)
 - **doctext**:xlsx 文本化(`doctext-xlsx`,复用 xlsx 模块)
+- **sliceutil**:`number_slice_to_string` 泛型化——全部有符号/无符号整型位宽直接可传(对位上游同款泛型化)
+- **mailer**:`SendOption` 选项面 + `send_mail_with`/`build_message_with`——HTML 正文(`text/html; charset=utf-8`,缺省仍纯文本);`Date` 头(RFC 5322)由 lettre 自动补齐
+- **auditutil**:`sign_log_content` 租户/用户 ID 升 `i64`——与下游 ID int64 契约对齐;小值(<2^53)JSON 序列化与旧 u32 版逐字节一致,存量签名仍可验证
+- **translator/baidu**:BCP47 语种归一(`zh-CN`→`zh`,未收录去地区后缀透传)、端点与 HTTP 客户端可配(`with_endpoint`/`with_agent`)、凭据与空输入守卫、多段译文按换行合并、salt 升 u64、10MB 响应体积防护;错误语与上游逐字对齐
+- **otp**:补 `generate_secret`(160-bit 密码学随机 Base32)/`validate_secret`(大写/去填充/去空格规范化);TOTP 校验对非规范形态 secret 同样可用
 
 ### 真实引擎落地(此前仅壳/兜底)
 

@@ -776,13 +776,16 @@ fn strip_leading_zeros(bytes: &[u8]) -> Vec<u8> {
 ///
 /// 签名内容:与上游一致的 `signContent` JSON 序列化
 /// `{"tenant_id":..,"user_id":..,"sec":..,"nanos":..,"log_hash":".."}`
-/// 的 SHA256。`created_at` 为秒级时间戳(`None` 置 `sec=0`、`nanos=0`;
+/// 的 SHA256。`tenant_id`/`user_id` 为 `i64`——与下游 ID int64 契约对齐
+/// (对位上游 uint64→int64 的两步演进;兼容性同理:小值 <2^53 的 JSON
+/// 十进制串与旧 u32 版逐字节一致,存量日志签名仍可验证)。
+/// `created_at` 为秒级时间戳(`None` 置 `sec=0`、`nanos=0`;
 /// 纳秒位恒为 0,见模块头"与上游的差异"第 2 条)。私钥不可为空由引用类型
 /// 保证——签名即凭证,调用方不应降级为无签名落库。
 pub fn sign_log_content(
     private_key: &SigningKey,
-    tenant_id: u32,
-    user_id: u32,
+    tenant_id: i64,
+    user_id: i64,
     created_at: Option<i64>,
     log_hash: &str,
 ) -> Result<Vec<u8>, String> {
@@ -799,7 +802,7 @@ pub fn sign_log_content(
 
 /// 构造与上游 `signContent` 结构体 `json.Marshal` 逐字节一致的签名内容
 /// (字段序固定、无空白;字符串按 Go encoding/json 默认转义)。
-fn sign_content_json(tenant_id: u32, user_id: u32, sec: i64, nanos: i32, log_hash: &str) -> String {
+fn sign_content_json(tenant_id: i64, user_id: i64, sec: i64, nanos: i32, log_hash: &str) -> String {
     format!(
         "{{\"tenant_id\":{tenant_id},\"user_id\":{user_id},\"sec\":{sec},\"nanos\":{nanos},\"log_hash\":\"{}\"}}",
         json_escape_string(log_hash)
@@ -891,8 +894,8 @@ mod tests {
 
     /// [Go] signContentJSON:与 sign_log_content 相同的签名内容序列化。
     fn sign_content_json_for_verify(
-        tenant_id: u32,
-        user_id: u32,
+        tenant_id: i64,
+        user_id: i64,
         sec: i64,
         nanos: i32,
         log_hash: &str,
@@ -1262,6 +1265,20 @@ mod tests {
         );
         // 自验通过,确证失败源于密钥不匹配而非签名内容
         assert!(vk_b.verify(content.as_bytes(), &parsed).is_ok());
+    }
+
+    #[test]
+    fn test_sign_log_content_id_contract_i64() {
+        // ID 契约:int64 口径下超出 u32 的租户/用户 ID 直接可序列化;
+        // 小值(<2^53)的 JSON 十进制串与旧 u32 版逐字节一致(存量签名可验)
+        assert_eq!(
+            sign_content_json_for_verify(5_000_000_000, 42, 1735689600, 0, "h"),
+            "{\"tenant_id\":5000000000,\"user_id\":42,\"sec\":1735689600,\"nanos\":0,\"log_hash\":\"h\"}"
+        );
+        assert_eq!(
+            sign_content_json_for_verify(7, 42, 1735689600, 0, "h"),
+            "{\"tenant_id\":7,\"user_id\":42,\"sec\":1735689600,\"nanos\":0,\"log_hash\":\"h\"}"
+        );
     }
 
     #[test]

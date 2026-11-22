@@ -9,6 +9,7 @@
 //! | Go                        | Rust                                  | 说明 |
 //! |---------------------------|---------------------------------------|------|
 //! | `SendMail(ctx, cfg, ...)` | [`send_mail`]                         | 同步阻塞 API;Rust 无 context,lettre 自带 60s 命令超时兜底 |
+//! | `SendOption`/`WithHTML()` | [`SendOption`] / [`send_mail_with`]   | 选项收敛为枚举切片;缺省形态 [`send_mail`] 保持原签名 |
 //! | `SmtpConfig`              | [`SmtpConfig`]                        | 字段一一对应(`Port` 收窄为 `u16`,SMTP 端口值域本就如此) |
 //! | `IsSupportedTlsMode`      | [`is_supported_tls_mode`]             | 判定逻辑逐字对齐 |
 //! | `buildMessage`            | [`build_message`]                     | 组包语义一致,字节差异见下 |
@@ -218,12 +219,23 @@ impl SmtpConfig {
 // 组包
 // ---------------------------------------------------------------------------
 
-/// 按 Go 版 `buildMessage` 的语义组装一封 UTF-8 纯文本邮件。
+/// 定制报文行为的选项(对位上游 `SendOption` 函数式选项;Rust 侧收敛为
+/// 枚举切片,`send_mail`/`build_message` 等价于传 `&[]` 的缺省形态)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendOption {
+    /// 正文按 `text/html; charset=utf-8` 声明;缺省为 `text/plain`。
+    Html,
+}
+
+/// 按 Go 版 `buildMessage` 的语义组装一封 UTF-8 纯文本邮件(缺省选项,
+/// 等价于 [`build_message_with`] 传 `&[]`;供既有调用方保持兼容)。
 ///
 /// 头部齐备:From(带可选显示名)、To(多收件人并成一个头,逗号分隔)、
 /// Subject(非 ASCII 自动 RFC 2047 编码)、`MIME-Version: 1.0`、
-/// `Content-Type: text/plain; charset=utf-8`。正文原样作为纯文本,
-/// 含非 ASCII 时 lettre 自动选合适的 `Content-Transfer-Encoding`。
+/// `Content-Type: text/plain; charset=utf-8`(HTML 见 [`SendOption::Html`])。
+/// 正文原样传递,含非 ASCII 时 lettre 自动选合适的
+/// `Content-Transfer-Encoding`;`Date` 头由 lettre 自动生成(上游 Go 版
+/// 本次同步才补齐,Rust 侧一直有)。
 ///
 /// ```
 /// use rust_utils::mailer::{build_message, SmtpConfig};
@@ -243,6 +255,18 @@ pub fn build_message(
     subject: &str,
     body: &str,
 ) -> Result<Message, String> {
+    build_message_with(cfg, to, subject, body, &[])
+}
+
+/// [`build_message`] 的全量形态:`opts` 定制报文行为(如
+/// [`SendOption::Html`] 把正文声明为 HTML)。
+pub fn build_message_with(
+    cfg: &SmtpConfig,
+    to: &[&str],
+    subject: &str,
+    body: &str,
+    opts: &[SendOption],
+) -> Result<Message, String> {
     let from = cfg.sender_mailbox()?;
 
     let mut builder = Message::builder().from(from);
@@ -253,10 +277,16 @@ pub fn build_message(
         builder = builder.to(Mailbox::new(None, address));
     }
 
+    let content_type = if opts.contains(&SendOption::Html) {
+        ContentType::TEXT_HTML
+    } else {
+        ContentType::TEXT_PLAIN
+    };
+
     builder
         .subject(subject.to_owned())
         .header(MIME_VERSION_1_0)
-        .header(ContentType::TEXT_PLAIN)
+        .header(content_type)
         .body(body.to_owned())
         .map_err(|e| format!("build message failed: {e}"))
 }
@@ -303,7 +333,8 @@ pub fn build_transport(cfg: &SmtpConfig) -> Result<SmtpTransport, String> {
     Ok(builder.build())
 }
 
-/// 通过 SMTP 发送一封纯文本邮件,`to` 可为多个收件人。
+/// 通过 SMTP 发送一封邮件(缺省纯文本,HTML 正文见 [`send_mail_with`]),
+/// `to` 可为多个收件人。
 ///
 /// 错误语义与 Go 版对齐:
 ///
@@ -329,6 +360,19 @@ pub fn build_transport(cfg: &SmtpConfig) -> Result<SmtpTransport, String> {
 /// # Ok::<(), String>(())
 /// ```
 pub fn send_mail(cfg: &SmtpConfig, to: &[&str], subject: &str, body: &str) -> Result<(), String> {
+    send_mail_with(cfg, to, subject, body, &[])
+}
+
+/// [`send_mail`] 的全量形态:`opts` 定制报文行为(如
+/// [`SendOption::Html`] 发 HTML 邮件)。本地校验(不拨号即返回的分支)
+/// 与缺省形态完全一致。
+pub fn send_mail_with(
+    cfg: &SmtpConfig,
+    to: &[&str],
+    subject: &str,
+    body: &str,
+    opts: &[SendOption],
+) -> Result<(), String> {
     if cfg.host.is_empty() || cfg.port == 0 {
         return Err("smtp host/port is not configured".to_owned());
     }
@@ -336,7 +380,7 @@ pub fn send_mail(cfg: &SmtpConfig, to: &[&str], subject: &str, body: &str) -> Re
         return Err("recipient is empty".to_owned());
     }
 
-    let message = build_message(cfg, to, subject, body)?;
+    let message = build_message_with(cfg, to, subject, body, opts)?;
     let transport = build_transport(cfg)?;
 
     transport
@@ -401,6 +445,58 @@ mod tests {
              Content-Transfer-Encoding: 7bit\r\n\
              \r\n\
              body line 1\r\nbody line 2",
+        );
+    }
+
+    #[test]
+    fn build_message_with_html_content_type() {
+        // WithHTML:正文 Content-Type 换 text/html,其余头部不变
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "",
+            "",
+            "sender@example.test",
+            "NONE",
+        );
+        let message = build_message_with(
+            &cfg,
+            &["rcpt@example.test"],
+            "html subject",
+            "<p>hello</p>",
+            &[SendOption::Html],
+        )
+        .unwrap();
+        let formatted = String::from_utf8(message.formatted()).unwrap();
+        assert!(formatted.contains("Content-Type: text/html; charset=utf-8\r\n"));
+        assert!(!formatted.contains("text/plain"));
+
+        // 缺省(空选项切片)等价旧签名,仍为纯文本
+        let plain = build_message_with(&cfg, &["rcpt@example.test"], "s", "b", &[]).unwrap();
+        assert!(String::from_utf8(plain.formatted())
+            .unwrap()
+            .contains("Content-Type: text/plain; charset=utf-8\r\n"));
+    }
+
+    #[test]
+    fn send_mail_with_local_validation_runs_before_dial() {
+        // 选项形态走同一套拨号前校验:配置缺失直接报错,不会碰网络
+        let cfg = SmtpConfig::new("", 0, "", "", "sender@example.test", "NONE");
+        assert_eq!(
+            send_mail_with(&cfg, &["rcpt@example.test"], "s", "b", &[SendOption::Html]),
+            Err("smtp host/port is not configured".to_owned())
+        );
+        let cfg = SmtpConfig::new(
+            "smtp.example.test",
+            25,
+            "",
+            "",
+            "sender@example.test",
+            "NONE",
+        );
+        assert_eq!(
+            send_mail_with(&cfg, &[], "s", "b", &[]),
+            Err("recipient is empty".to_owned())
         );
     }
 

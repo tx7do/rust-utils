@@ -9,6 +9,8 @@
 //!
 //! 兼容入口 [`totp_at`]/[`totp_verify`] 保持最早行为（SHA-1、6 位、±1 窗）；
 //! 新代码建议直接用带 `Digest`/`digits`/`window` 参数的全量形态。
+//! secret 的生成与形态校验见 [`generate_secret`]/[`validate_secret`]
+//! （对位上游独立 `totp` 包的同名入口）。
 
 use hmac::Mac;
 use sha1::Sha1;
@@ -88,6 +90,41 @@ pub fn base32_decode(input: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// 生成 secret 的字节数（160-bit，与主流验证器 App 兼容，上游 totp 同款）。
+const SECRET_BYTES: usize = 20;
+
+/// 生成新的 TOTP secret：160-bit 密码学随机，Base32 无填充编码返回
+/// （对位上游 totp 包的 GenerateSecret）。验证器 App 扫码/手动录入都认
+/// 这个形态。
+pub fn generate_secret() -> Result<String, String> {
+    let mut buf = [0u8; SECRET_BYTES];
+    getrandom::fill(&mut buf).map_err(|e| format!("generate random failed: {e}"))?;
+    Ok(base32_encode(&buf))
+}
+
+/// 校验 Base32 secret 形态合法（对位上游 totp 包的 ValidateSecret）：
+/// 规范化为大写、去尾部 `=` 填充、去空格后返回；解码失败报错。
+/// 与上游的差异：空串(规范化后)直接报错——Rust 侧 fail-fast,空密钥
+/// 没有语义。
+///
+/// [`totp_verify`] / [`totp_verify_digest`] 内部也先走本函数，因此校验
+/// 接口对填充、空格、小写形态的 secret 同样可用。
+pub fn validate_secret(secret: &str) -> Result<String, String> {
+    let normalized: String = secret
+        .trim_end_matches('=')
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    if normalized.is_empty() {
+        return Err("invalid base32 secret: empty".to_owned());
+    }
+    match base32_decode(&normalized) {
+        Some(_) => Ok(normalized),
+        None => Err(format!("invalid base32 secret: {secret:?}")),
+    }
+}
+
 fn hmac_digest(digest: Digest, secret: &[u8], data: &[u8]) -> Vec<u8> {
     macro_rules! run {
         ($ty:ty) => {{
@@ -159,7 +196,12 @@ pub fn totp_verify_digest(
     if code.len() != digit_len || !code.bytes().all(|b| b.is_ascii_digit()) {
         return false;
     }
-    let Some(secret) = base32_decode(secret_base32) else {
+    // 先归一（大写/去填充/去空格）再解码——小写、带填充、带空格的
+    // secret 形态同样可校验（对位上游 Verify 先 ValidateSecret）
+    let Ok(normalized) = validate_secret(secret_base32) else {
+        return false;
+    };
+    let Some(secret) = base32_decode(&normalized) else {
         return false;
     };
     for drift in -window..=window {
@@ -532,6 +574,53 @@ mod tests {
         assert!(!totp_verify(&secret, "28708", now));
         assert!(!totp_verify(&secret, "28708a", now));
         assert!(!totp_verify("!!!!", "287082", now));
+    }
+
+    #[test]
+    fn totp_verify_accepts_noncanonical_secret_shapes() {
+        // 小写、带填充、带空格的 secret 形态同样可校验
+        // (上游 Verify 先 ValidateSecret 的语义)
+        let secret = base32_encode(b"12345678901234567890");
+        let now = 59i64;
+        assert!(totp_verify(&secret.to_lowercase(), "287082", now));
+        assert!(totp_verify(&format!("{}====", secret), "287082", now));
+        // 每 4 字符插一个空格的展示形态(secret 是纯 ASCII,按字节分组安全)
+        let spaced = secret
+            .as_bytes()
+            .chunks(4)
+            .map(|c| String::from_utf8_lossy(c).to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(totp_verify(&spaced, "287082", now));
+    }
+
+    #[test]
+    fn generate_secret_shape_and_uniqueness() {
+        let a = generate_secret().unwrap();
+        let b = generate_secret().unwrap();
+        // 形态:160-bit → base32 无填充 32 字符,解码回 20 字节
+        assert_eq!(a.len(), 32);
+        assert!(a
+            .bytes()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
+        assert!(!a.contains('='));
+        assert_eq!(base32_decode(&a).unwrap().len(), SECRET_BYTES);
+        // 两次生成不重合(160-bit 随机碰撞概率可忽略)
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn validate_secret_normalizes_and_rejects() {
+        // 规范化:大写、去尾部填充、去空格
+        assert_eq!(validate_secret("mzxw6ytboi======").unwrap(), "MZXW6YTBOI");
+        assert_eq!(validate_secret("mzxw 6ytb oi").unwrap(), "MZXW6YTBOI");
+        assert_eq!(validate_secret("MZXW6YTBOI").unwrap(), "MZXW6YTBOI");
+        // 非法字母/空串报错
+        assert!(validate_secret("MZXW6YTBO!").is_err());
+        assert!(validate_secret("").is_err());
+        // 生成→校验往返:规范化后仍是自身
+        let s = generate_secret().unwrap();
+        assert_eq!(validate_secret(&s).unwrap(), s);
     }
 
     #[test]
