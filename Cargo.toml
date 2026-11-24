@@ -11,7 +11,7 @@ keywords = ["utils", "toolbox", "stringcase", "snowflake", "pagination"]
 categories = ["development-tools", "utilities"]
 # 62MB 的 GeoLite2 测试库只服务单测(assets/geoip/README.md),不进发布包;
 # 测试从 CARGO_MANIFEST_DIR 运行时读取,包内缺失时用例自行跳过。
-exclude = ["assets/geoip", "assets/jwt", ".github"]
+exclude = ["assets/geoip", "assets/jwt", "assets/sfs2x", ".github"]
 
 [features]
 default = []
@@ -152,6 +152,7 @@ full = [
     "mapper",
     "structutil",
     "code-generator",
+    "sfs2x",
 ]
 
 # Excel(xlsx)读写:calamine 读 + rust_xlsxwriter 写。
@@ -168,6 +169,8 @@ distlock-etcd = ["distlock", "dep:etcd-client", "dep:tokio", "dep:getrandom"]
 prost-time = ["chrono", "dep:prost-types"]
 # OPA 引擎落地(authorizer 的 "opa" 类型,HTTP 评 /v1/data;未启用时 DenyAll 兜底)。
 authorizer-opa = ["authorizer", "dep:ureq", "dep:serde", "dep:serde_json"]
+# SFS2X 二进制协议编解码:类型化对象/帧封装/zlib 压缩/AES-128-CBC 加密/消息信封。
+sfs2x = ["dep:aes", "dep:cbc", "dep:flate2", "dep:getrandom"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
@@ -219,6 +222,8 @@ calamine = { version = "0.38", optional = true }
 casbin = { version = "2", default-features = false, features = ["runtime-tokio"], optional = true }
 etcd-client = { version = "0.14", optional = true }
 prost-types = { version = "0.14", optional = true }
+# sfs2x 的帧 zlib 压缩(0x20)。
+flate2 = { version = "1", default-features = false, features = ["rust_backend"], optional = true }
 
 # 基准测试(仅 `cargo bench` 时编译);关闭默认特性以精简依赖,
 # 只保留 cargo bench 所需的 cargo_bench_support。
@@ -226,6 +231,9 @@ prost-types = { version = "0.14", optional = true }
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 # qrcode 单测的扫码回读校验(仅测试编译,不进发布依赖)。
 rqrr = "0.9"
+# sfs2x 黄金向量 manifest 解析(仅测试编译,不进发布依赖)。
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [[bench]]
 name = "stringcase"
@@ -305,6 +313,10 @@ required-features = ["code-generator"]
 [[example]]
 name = "mapper"
 required-features = ["mapper"]
+
+[[example]]
+name = "sfs2x"
+required-features = ["sfs2x"]
 
 [[bench]]
 name = "collections"

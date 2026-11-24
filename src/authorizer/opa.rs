@@ -238,6 +238,18 @@ mod tests {
                 );
                 let _ = stream.write_all(resp.as_bytes());
                 let _ = stream.flush();
+                // 排空客户端剩余入站(如请求体)直到其对端关闭,再放行
+                // drop——Windows 上带未读数据的 socket 丢弃会发 RST,把客户端
+                // 还没读完的响应一并撕掉(负载重时的调度偏移让竞态显形为
+                // os error 10053/10054 的 flake)
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let mut sink = [0u8; 4096];
+                loop {
+                    match stream.read(&mut sink) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {}
+                    }
+                }
             }
             // 脚本耗尽后直接收尾(后续请求由调用方以 Err 断言)
         });
@@ -266,10 +278,12 @@ mod tests {
     }
 
     fn engine_at(port: u16) -> OpaEngine {
+        // 10s:全量并行跑套件时机器可能被其它测试吃满 CPU,2s 会先于服务器
+        // 响应触发超时,把断言的错误语换成超时信息(负载敏感 flake)
         OpaEngine::with_config(
             &format!("http://127.0.0.1:{port}"),
             "/v1/data/rbac/allow",
-            std::time::Duration::from_secs(2),
+            std::time::Duration::from_secs(10),
         )
     }
 

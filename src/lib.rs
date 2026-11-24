@@ -20,6 +20,7 @@
 //! | [`netutil`] | 默认 | SSRF 防护(URL 校验 + 黑名单网段 + DNS 解析检查)、可信代理链客户端 IP |
 //! | [`pagination`] | 默认 | 分页偏移量 |
 //! | [`cryptocurrency`] | 默认 | 加密货币钱包地址格式校验 |
+//! | [`currency`] | 默认 | ISO 4217 两层单位换算(minor/账本单位)、Money 类型、格式化与解析 |
 //! | [`query_parser`] | `json` | Django 风格 `field__op` 过滤/排序解析 |
 //! | [`ddl_parser`] | 默认 | MySQL `CREATE TABLE` 解析(手写词法,零依赖) |
 //! | [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
@@ -53,6 +54,7 @@
 //! | [`fieldmask`] | `fieldmask` | 字段掩码:嵌套掩码树 + filter/prune/overwrite/validate |
 //! | [`sm`] | `sm` | 国密 SM2(C1C3C2/ASN.1)/SM3/SM4-CBC |
 //! | [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP(SHA-1/256/512)、otpauth:// URI 构造解析 |
+//! | [`sfs2x`] | `sfs2x` | SFS2X 二进制协议:类型化对象/帧封装/zlib 压缩/AES-128-CBC/消息信封,ZewSFS 黄金向量互操作已测 |
 //! | [`qrcode`] | `qrcode`(PNG 用 `qrcode-png`) | QR 码:模块矩阵 + SVG + 终端块字符,解码回环已测 |
 //! | [`xlsx`] | `xlsx` | Excel 读写:calamine 读 + rust_xlsxwriter 写,写出读回闭环 |
 //! | [`code_generator`] | `code-generator` | 模板驱动代码生成:mustache 子集渲染(缺字段即报错)+ 落盘守卫 |
@@ -67,6 +69,7 @@ pub mod authorizer;
 pub mod byteutil;
 pub mod converter;
 pub mod cryptocurrency;
+pub mod currency;
 pub mod ddl_parser;
 pub mod eventbus;
 pub mod eventloop;
@@ -86,17 +89,20 @@ pub mod stringutil;
 #[cfg(feature = "bank-card")]
 pub mod bank_card;
 
-// 标准 base64(带填充),供 captcha/crypto/sm/translator/ossutil 模块共用。
+// 标准 base64(带填充),供 captcha/crypto/sm/sfs2x/translator/ossutil 模块共用。
 #[cfg(any(
     feature = "captcha",
     feature = "crypto",
     feature = "sm",
+    feature = "sfs2x",
     feature = "translator",
     feature = "ossutil"
 ))]
 pub(crate) mod base64util {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+    /// sfs2x 单 feature 下仅 decode 被消费,encode 保留给其余门控模块
+    #[allow(dead_code)]
     pub fn encode(data: &[u8]) -> String {
         let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
         for chunk in data.chunks(3) {
@@ -199,6 +205,8 @@ pub mod prost_time;
 pub mod qrcode;
 #[cfg(feature = "rand")]
 pub mod random;
+#[cfg(feature = "sfs2x")]
+pub mod sfs2x;
 #[cfg(feature = "slug")]
 pub mod slug;
 #[cfg(feature = "sm")]
@@ -220,6 +228,7 @@ pub mod xlsx;
         feature = "captcha",
         feature = "crypto",
         feature = "sm",
+        feature = "sfs2x",
         feature = "translator"
     )
 ))]

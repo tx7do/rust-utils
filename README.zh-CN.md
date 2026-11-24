@@ -39,9 +39,10 @@ rust-utils = "0.2"
 | [`maputil`] | 默认 | keys/values/merge/drop/filter |
 | [`mathutil`] | 默认 | 统计量、手写正态分布(Gaussian)、Erfc/Ierfc |
 | [`sensitive`] | 默认 | 敏感词过滤:词典树最长匹配、穿插字符跳过、打码 |
-| [`netutil`] | 默认 | SSRF 防护(URL 校验 + 黑名单网段 + DNS 解析检查)、可信代理链客户端 IP |
+| [`netutil`] | 默认 | SSRF 防护(URL 校验 + 黑名单网段 + DNS 解析检查)、可信代理链客户端 IP、调优连接池的 HTTP 客户端 |
 | [`pagination`] | 默认 | 分页偏移量 |
 | [`cryptocurrency`] | 默认 | 加密货币钱包地址格式校验 |
+| [`currency`] | 默认 | ISO 4217 两层单位换算(minor/账本单位)、Money 类型(币种不匹配即报错的算术、精确守恒分配)、展示格式化与解析 |
 | [`query_parser`] | `json`(JSON 形式需要) | Django 风格 `field__op` 过滤/排序解析 |
 | [`ddl_parser`] | 默认 | MySQL `CREATE TABLE` 解析(手写词法,零依赖) |
 | [`eventloop`] | 默认 | 单线程优先级事件循环,支持帧驱动模式 |
@@ -75,6 +76,7 @@ rust-utils = "0.2"
 | [`distlock`] | `distlock` | 分布式锁:Locker/Lock 抽象与获取选项(Redis 落地用 `distlock-redis`,兼容 bsm/redislock 线上协议;etcd 落地用 `distlock-etcd`,lease+txn 抢锁、支持阻塞等待) |
 | [`sm`] | `sm` | 国密 SM2(C1C3C2/ASN.1 加解密、签名验签)/SM3/SM4-CBC |
 | [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP(SHA-1/256/512、6~8 位、可配窗口),`otpauth://` URI 构造与解析 |
+| [`sfs2x`] | `sfs2x` | SFS2X 二进制协议:类型化对象/帧封装/zlib 压缩/AES-128-CBC 加密/消息信封,ZewSFS 黄金向量互操作已测 |
 | [`qrcode`] | `qrcode`(PNG 用 `qrcode-png`) | QR 码:模块矩阵 + SVG + 终端块字符,解码回环已测 |
 | [`xlsx`] | `xlsx` | Excel 读写:calamine 读 + rust_xlsxwriter 写,写出→读回在库内闭环测试 |
 | [`code_generator`] | `code-generator` | 模板驱动代码生成:mustache 子集渲染(缺字段即报错)+ 落盘守卫 |
@@ -126,6 +128,8 @@ rust-utils = "0.2"
 [`otp`]: src/otp.rs
 [`qrcode`]: src/qrcode.rs
 [`xlsx`]: src/xlsx.rs
+[`currency`]: src/currency.rs
+[`sfs2x`]: src/sfs2x.rs
 [`code_generator`]: src/code_generator.rs
 [`mapper`]: src/mapper.rs
 [`printrender`]: src/printrender.rs

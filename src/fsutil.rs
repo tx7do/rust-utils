@@ -126,20 +126,20 @@ pub fn is_nonempty_dir(path: &Path) -> bool {
 
 /// 是否为非空且对当前用户可执行的文件(仅类 Unix 平台检查执行位)。
 pub fn is_nonempty_executable_file(path: &Path) -> bool {
-    if !is_nonempty_file(path) {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(path)
-            .map(|m| m.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    is_nonempty_file(path) && is_executable(path)
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(_path: &Path) -> bool {
+    true
 }
 
 /// 读取文件;失败返回 `None`。

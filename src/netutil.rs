@@ -682,6 +682,54 @@ pub fn lookup_and_check_host(host: &str) -> Result<Vec<IpAddr>, String> {
 }
 
 // ============================================================================
+// HTTP 连接池调优(对位上游 httpclient.go 的 TunedHTTPTransport)
+// ============================================================================
+
+/// 调优后的总空闲连接上限(对位上游 MaxIdleConns=100)。
+#[cfg(any(feature = "translator", feature = "notify", feature = "authorizer-opa"))]
+pub const TUNED_MAX_IDLE_CONNECTIONS: usize = 100;
+/// 调优后的单主机空闲连接上限(对位上游 MaxIdleConnsPerHost=16)。
+///
+/// 默认值过小(ureq 缺省 1,Go 缺省 2)是突发流量下 TCP/TLS 反复重建的
+/// 根源:空闲连接在波次之间被批量拆除,下一波请求每条都多付 1-2 个 RTT
+/// 的握手。对同一远端主机的高 QPS 调用(如每请求都打的上游网关)把该值
+/// 抬到 16。
+#[cfg(any(feature = "translator", feature = "notify", feature = "authorizer-opa"))]
+pub const TUNED_MAX_IDLE_CONNECTIONS_PER_HOST: usize = 16;
+
+/// 构建面向高 QPS 同主机流量的调优 [`ureq::Agent`](对位上游
+/// `TunedHTTPTransport`):总空闲 100、单主机空闲 16。
+///
+/// 与 Go 版的差异:ureq 2.x 无 `IdleConnTimeout` 旋钮(空闲连接寿命由
+/// 内部管理),仅能调池容量两个参数——缺省总量已是 100,这里显式钉住;
+/// 单主机是本调优的实质内容。
+///
+/// 需要 `translator`/`notify`/`authorizer-opa` 任一 feature(它们带来 ureq)。
+#[cfg(any(feature = "translator", feature = "notify", feature = "authorizer-opa"))]
+#[must_use]
+pub fn tuned_http_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .max_idle_connections(TUNED_MAX_IDLE_CONNECTIONS)
+        .max_idle_connections_per_host(TUNED_MAX_IDLE_CONNECTIONS_PER_HOST)
+        .build()
+}
+
+// ============================================================================
+// 服务端超时指引(对位上游 httpserver.go 的 TuneRestServerTimeouts)
+// ============================================================================
+//
+// 上游为 Kratos REST 服务器补了两个网络层超时:ReadHeaderTimeout 10s
+// (slowloris 防线)与 IdleTimeout 120s(keep-alive 连接回收);Read/
+// WriteTimeout 刻意不设——REST 前端还承载 SSE 长驻事件流,读写截止会
+// 把流中途掐断。
+//
+// Rust 侧本 crate 不含 HTTP 服务器,该调优属服务框架职责,不做代码移植,
+// 保留同样的数字与理由作为指引:
+// - 读请求头超时 10s:封 slowloris 面;
+// - 空闲 keep-alive 连接回收 120s:防连接堆积;
+// - 读/写截止不设:给 SSE 长驻流留路(axum/actix/hyper 各有自己的旋钮)。
+
+// ============================================================================
 // 测试(移植自上游 client_ip_test.go / client_ip_extra_test.go / ssrf_test.go /
 // ssrf_extra_test.go / url_validate_test.go,另加 CIDR 解析单元测试)
 // ============================================================================
@@ -1333,6 +1381,23 @@ mod tests {
                 "::1/128",
                 "fc00::/7"
             ]
+        );
+    }
+
+    // ============================================================
+    // HTTP 连接池调优(对位上游 http_tuning_test.go 的 transport 断言)
+    // ============================================================
+
+    #[cfg(any(feature = "translator", feature = "notify", feature = "authorizer-opa"))]
+    #[test]
+    fn test_tuned_http_agent_connect_pool_tuning() {
+        // 调优契约:总空闲 100 / 单主机空闲 16(上游同款数字)。ureq 无
+        // IdleConnTimeout 旋钮,该差量在文档注明。
+        let _agent = tuned_http_agent();
+        assert_eq!(TUNED_MAX_IDLE_CONNECTIONS, 100, "total idle-connection cap");
+        assert_eq!(
+            TUNED_MAX_IDLE_CONNECTIONS_PER_HOST, 16,
+            "per-host idle cap (default 1 is what forces TCP rebuilds)"
         );
     }
 }

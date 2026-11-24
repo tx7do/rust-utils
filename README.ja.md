@@ -39,9 +39,10 @@ rust-utils = "0.2"
 | [`maputil`] | デフォルト | keys/values/merge/drop/filter |
 | [`mathutil`] | デフォルト | 統計量、手書き正規分布(Gaussian)、Erfc/Ierfc |
 | [`sensitive`] | デフォルト | センシティブワードフィルタ:トライ木の最長一致、介在文字スキップ、マスキング |
-| [`netutil`] | 默认 | SSRF 防護(URL 検証 + 拒否 CIDR + DNS 解決チェック)、信頼プロキシチェーンによるクライアント IP |
+| [`netutil`] | 默认 | SSRF 防護(URL 検証 + 拒否 CIDR + DNS 解決チェック)、信頼プロキシチェーンによるクライアント IP、チューニング済み接続プール HTTP エージェント |
 | [`pagination`] | デフォルト | ページング オフセット |
 | [`cryptocurrency`] | デフォルト | 暗号資産ウォレットアドレスの形式検証 |
+| [`currency`] | デフォルト | ISO 4217 の 2 層単位換算(minor/台帳単位)、Money 型(通貨不一致エラーの演算・完全保存の分配)、表示フォーマットと解析 |
 | [`query_parser`] | `json`(JSON 形式に必要) | Django 風 `field__op` フィルタ/ソート解析 |
 | [`ddl_parser`] | デフォルト | MySQL `CREATE TABLE` 解析(手書きレキサ、ゼロ依存) |
 | [`eventloop`] | デフォルト | シングルスレッド優先度付きイベントループ、フレーム駆動モード対応 |
@@ -75,6 +76,7 @@ rust-utils = "0.2"
 | [`distlock`] | `distlock` | 分散ロック:Locker/Lock 抽象と取得オプション(Redis 実装は `distlock-redis`、bsm/redislock プロトコルとワイヤ互換。etcd 実装は `distlock-etcd`、lease+txn 取得、ブロック待ち対応) |
 | [`sm`] | `sm` | 中国国家暗号 SM2(C1C3C2/ASN.1 の暗号化・署名検証)/SM3/SM4-CBC |
 | [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP(SHA-1/256/512、6〜8 桁、設定可能なウィンドウ)、`otpauth://` URI の構築と解析 |
+| [`sfs2x`] | `sfs2x` | SFS2X バイナリプロトコル:型付きオブジェクト/フレーム封入/zlib 圧縮/AES-128-CBC 暗号化/メッセージ封筒、ZewSFS ゴールデンベクター相互運用テスト済み |
 | [`qrcode`] | `qrcode`(PNG は `qrcode-png`) | QR コード:モジュール行列 + SVG + 端末ブロック文字、デコード往復をテスト済み |
 | [`xlsx`] | `xlsx` | Excel 読み書き:calamine リーダ + rust_xlsxwriter ライタ、書き出し→読み戻しをクレート内で閉ループテスト |
 | [`code_generator`] | `code-generator` | テンプレート駆動コード生成:mustache サブセット描画(未定義フィールドは即エラー)+ 出力ガード |
@@ -126,6 +128,8 @@ rust-utils = "0.2"
 [`otp`]: src/otp.rs
 [`qrcode`]: src/qrcode.rs
 [`xlsx`]: src/xlsx.rs
+[`currency`]: src/currency.rs
+[`sfs2x`]: src/sfs2x.rs
 [`code_generator`]: src/code_generator.rs
 [`mapper`]: src/mapper.rs
 [`printrender`]: src/printrender.rs

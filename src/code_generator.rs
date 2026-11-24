@@ -561,7 +561,13 @@ mod tests {
         });
         let ctx = json!({});
         assert!(g.render_to("t.tmpl", &ctx, &dir, "../escape.rs").is_err());
-        assert!(g.render_to("t.tmpl", &ctx, &dir, "/abs/escape.rs").is_err());
+        // Windows 上无盘符的 "/abs" 不算绝对路径(join 会落到当前盘符根),
+        // 绝对路径用例按平台取形
+        #[cfg(windows)]
+        let abs = "C:/abs/escape.rs";
+        #[cfg(not(windows))]
+        let abs = "/abs/escape.rs";
+        assert!(g.render_to("t.tmpl", &ctx, &dir, abs).is_err());
         // 空文件名
         assert!(g.render_to("t.tmpl", &ctx, &dir, "").is_err());
         cleanup_test_dir(&dir);

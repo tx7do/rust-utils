@@ -3,6 +3,20 @@
 本项目的所有重要变更记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 对齐上游 go-utils 14-17 批次(maputils SyncMap / currency / sfs2x / netutil HTTP 调优)
+
+#### 新增模块
+
+- **currency**(默认,零依赖):ISO 4217 两层单位体系——minor units(分,按币种指数 0/2/3 位)与定精度账本单位(统一 4 位小数,与币种指数解耦);`Money` 类型:整数账本域算术(币种不匹配即报错、溢出 fail-fast)、Fowler 式精确守恒分配/拆分(最大余数法)、整数域精确汇率与比例乘法(全程无浮点)、方向舍入变体(floor/ceil)、千分位/符号格式化与解析(字符串往返无损);全量 ISO 4217 活跃码元数据表(161 条:数字码 + 英文名 + 常用符号)
+- **sfs2x**(`sfs2x`):SFS2X 二进制协议编解码——类型化对象(`Value` 枚举承载类型码,排序确定性编码 + 插入序官方字节忠实双模式)、帧封装(uint16/BIG_SIZE uint32 自动切换、zlib 压缩阈值可配、AES-128-CBC 加密的官方固定 key+IV 与随机 IV 自描述两模式)、消息信封({c,a,p} + 握手/系统 action 码)、官方 CLASS($C/$F)识别;解压输出 64 MiB 上限防炸弹;与 ZewSFS Python 参考实现的黄金向量互操作(解码值 + 重编码字节级一致,资产在 `assets/sfs2x/`,不入发布包)
+
+#### 既有模块深化
+
+- **maputil**:`SyncMap<K, V>` 类型化并发映射(对位上游 maputils 的 `SyncMap`)——`load`/`load_or_store`/`store`/`delete`/`range`/`len` 与 Go `sync.Map` 语义对齐;`RwLock<HashMap>` 等价实现(零依赖),`len` O(1) 优于上游 O(n)
+- **netutil**:`tuned_http_agent` 调优连接池的 ureq Agent(对位上游 `TunedHTTPTransport`:总空闲 100/单主机空闲 16;ureq 无 IdleConnTimeout 旋钮,文档注明);服务端超时(读头 10s/空闲 120s/读写截止不设保 SSE)以指引形式落在文档——本 crate 不含 HTTP 服务器
+
 ## [0.2.0] - 2026-11-22
 
 相对 0.1.0 的主体是一次大扩容:对齐上游 go-utils 全部模块清单,并把若干「壳」升级为带真实后端与真实实例测试的落地。

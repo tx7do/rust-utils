@@ -39,9 +39,10 @@ rust-utils = "0.2"
 | [`maputil`] | default | keys/values/merge/drop/filter |
 | [`mathutil`] | default | Statistics, hand-written Gaussian, Erfc/Ierfc |
 | [`sensitive`] | default | Sensitive-word filtering: trie longest-match, interspersed-char skipping, masking |
-| [`netutil`] | 默认 | SSRF protection (URL validation + blocked CIDRs + DNS resolve check), spoof-proof client IP via trusted proxy chain |
+| [`netutil`] | 默认 | SSRF protection (URL validation + blocked CIDRs + DNS resolve check), spoof-proof client IP via trusted proxy chain, tuned connection-pool HTTP agent |
 | [`pagination`] | default | Pagination offsets |
 | [`cryptocurrency`] | default | Crypto wallet address format validation |
+| [`currency`] | default | ISO 4217 two-layer unit conversion (minor/ledger units), typed `Money` with mismatch-safe arithmetic, exact-sum allocation, display formatting & parsing |
 | [`query_parser`] | `json` (for the JSON form) | Django-style `field__op` filter/sort parsing |
 | [`ddl_parser`] | default | MySQL `CREATE TABLE` parsing (hand-written lexer, zero deps) |
 | [`eventloop`] | default | Single-threaded priority event loop, with a frame-driven mode |
@@ -75,6 +76,7 @@ rust-utils = "0.2"
 | [`distlock`] | `distlock` | Distributed locks: Locker/Lock abstractions with acquire options (Redis store via `distlock-redis`, wire-compatible with the bsm/redislock protocol; etcd store via `distlock-etcd`, lease+txn acquisition with block-wait support) |
 | [`sm`] | `sm` | Chinese national crypto SM2 (C1C3C2/ASN.1 encryption & signatures) / SM3 / SM4-CBC |
 | [`otp`] | `otp` | RFC 4226 HOTP / RFC 6238 TOTP (SHA-1/256/512, 6–8 digits, configurable window), `otpauth://` URI building & parsing |
+| [`sfs2x`] | `sfs2x` | SFS2X binary protocol: typed objects / frame envelopes / zlib compression / AES-128-CBC encryption / message envelopes; ZewSFS golden-vector interop tested |
 | [`qrcode`] | `qrcode` (PNG via `qrcode-png`) | QR codes: module matrix + SVG + terminal block chars; decode roundtrip covered in tests |
 | [`xlsx`] | `xlsx` | Excel read/write: calamine reader + rust_xlsxwriter writer, write→read roundtrip tested in-crate |
 | [`code_generator`] | `code-generator` | Template-driven codegen: mustache-subset renderer (missing fields fail fast) + guarded file output |
@@ -126,6 +128,8 @@ rust-utils = "0.2"
 [`otp`]: src/otp.rs
 [`qrcode`]: src/qrcode.rs
 [`xlsx`]: src/xlsx.rs
+[`currency`]: src/currency.rs
+[`sfs2x`]: src/sfs2x.rs
 [`code_generator`]: src/code_generator.rs
 [`mapper`]: src/mapper.rs
 [`printrender`]: src/printrender.rs
