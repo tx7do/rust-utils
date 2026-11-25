@@ -25,12 +25,17 @@ jobs:
           --health-retries 10
       etcd:
         image: gcr.io/etcd-development/etcd:v3.5.21
-        cmd:
-          - etcd
-          - --listen-client-urls=http://0.0.0.0:2379
-          - --advertise-client-urls=http://127.0.0.1:2379
+        # services 不支持 cmd,改用 etcd 原生的 ETCD_* 环境变量配置
+        env:
+          ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+          ETCD_ADVERTISE_CLIENT_URLS: http://127.0.0.1:2379
         ports:
           - 2379:2379
+        options: >-
+          --health-cmd "etcdctl endpoint health"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
